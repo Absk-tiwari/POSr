@@ -1,0 +1,38 @@
+{
+  "name": "nodepos",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "escpos": "^2.5.2",
+    "escpos-usb": "^3.0.0-alpha.4",
+    "express": "^4.21.2",
+    "express-validator": "^7.2.1",
+    "grunt": "^0.4.5",
+    "grunt-node-gyp": "^1.0.0",
+    "http": "^0.0.1-security",
+    "jsonwebtoken": "^9.0.2",
+    "knex": "^3.1.0",
+    "multer": "^1.4.5-lts.1",
+    "node-thermal-printer": "^4.4.3",
+    "nodemon": "^3.1.9",
+    "objection": "^3.1.5",
+    "pdf-lib": "^1.17.1",
+    "pdf2image": "^1.2.3",
+    "printer": "^0.4.0",
+    "puppeteer": "^24.1.0",
+    "sharp": "^0.33.5",
+    "sqlite3": "^5.1.7",
+    "usb": "^1.9.2",
+    "xlsx": "^0.18.5"
+  }
+}
