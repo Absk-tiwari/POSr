@@ -1,13 +1,27 @@
 import axios from "axios";
 
 let userToken = localStorage.getItem('pos-token') ?? null
-const menus = JSON.parse(localStorage.getItem('menus'))??[];
 const isAdmin = JSON.parse(localStorage.getItem('isAdmin'))??false;
 const myInfo = JSON.parse(localStorage.getItem('pos-user')??'{}')
 const cartProducts = JSON.parse(localStorage.getItem('cartProducts')??'{"1":[]}');
 const cartStocks = JSON.parse(localStorage.getItem('cartStocks')??'{}')
 const openingCash = JSON.parse(localStorage.getItem('openingCash')??'{}');
 const openingCashID = localStorage.getItem('openingCashID')?? null;
+const appKey = localStorage.getItem('_pos_app_key')??'';
+let stockAlert = JSON.parse(localStorage.getItem('_pos_stock_alert')??'0');
+if(!stockAlert) {
+    axios.get(process.env.REACT_APP_BACKEND_URI+ `config/stock-alert`, {
+        headers: {
+            'Content-Type' : 'application/json',
+            'pos-token': localStorage.getItem('pos-token')
+        }
+    }).then(({data}) => {
+
+        if(data.status && data.stock) {
+            localStorage.setItem('_pos_stock_alert', JSON.stringify(data.stock))
+        }
+    })
+}
 
 async function getUserDetails () {
   try {
@@ -25,14 +39,16 @@ const initialState = {
     error: null,
     errorCode:null,
     success: false, 
-    currency: localStorage.getItem('currency'),  
+    currency: '€ ',  
 	search:'',  
     isAdmin,
     openingCash,
     openingCashID,
     cartProducts,
     split: JSON.parse(localStorage.getItem('split')??'false'),
-    cartStocks
+    cartStocks,
+    appKey,
+    stockAlert
 }
 
 const authReducer = (state=initialState,action) => {
@@ -160,6 +176,42 @@ const authReducer = (state=initialState,action) => {
             return {
                 ...state,
                 openingCashID: action.payload
+            }
+        }
+
+        case "RESET_KART": {
+            localStorage.setItem('cartStocks', JSON.stringify({}));
+            let fresh = {1:[]}
+            localStorage.setItem('cartProducts', JSON.stringify(fresh));
+            return {
+                ...state,
+                cartProducts:fresh,
+                cartStocks:{}
+            } 
+        }
+        case "SET_APP_KEY" : {
+            localStorage.setItem("_pos_app_key", action.payload);
+            return {
+                ...state,
+                appKey: action.payload
+            }
+        }
+
+        case "DAY_CLOSE" : {
+            localStorage.setItem('openingCash', '{}');
+            return {
+                ...state,
+                openingCash:{}
+            }
+        }
+
+        case "STOCK_ALERT" : {
+            if(action.payload){
+                localStorage.setItem('_pos_stock_alert', typeof action.payload ==='string'? action.payload: JSON.stringify(action.payload));
+            }
+            return {
+                ...state,
+                stockAlert:action.payload
             }
         }
         default : return state

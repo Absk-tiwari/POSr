@@ -1,58 +1,94 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useReactToPrint } from "react-to-print";
 import { useDispatch, useSelector } from 'react-redux'
-import { useGetNotesQuery } from '../../features/centerSlice';
+import { commonApiSlice, useGetNotesQuery } from '../../features/centerSlice';
 import pos from '../../asset/images/pos.png'
-import { capitalFirst } from '../../helpers/utils';
+import { capitalFirst, Warning } from '../../helpers/utils';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useSearch } from '../../contexts/SearchContext';
+import html2canvas from 'html2canvas';
 
 
 export default function Payment() 
 {
+    const targetDiv = useRef(null);
+    const navigate = useNavigate();
     const {active} = useParams();
-    const {data, isSuccess} = useGetNotesQuery();
+    const [receiptOn, setReceipt] = useState(JSON.parse(localStorage.getItem('prt_receipt')??'false'));
+    const { data, isSuccess } = useGetNotesQuery();
     const componentRef = useRef(null);
-    const {setSession, sessions, setActiveSession } = useSearch();
-
-    const [ byAll , setByAll ] = useState({Cash:0, Card:0, Account:0});
-
-    const dispatch = useDispatch()
-    const mode = {width:'96%',cursor:'pointer'}
+    const { setSession, sessions } = useSearch();
+    const [ byAll, setByAll ] = useState({Cash:0, Card:0, Account:0});
+    const dispatch = useDispatch();
+    const mode = { width:'96%', cursor:'pointer' }
     const reactToPrintFn = useReactToPrint({ contentRef:componentRef});
-    const { currency, myInfo, cartProducts, openingCash } = useSelector(state => state.auth );
-    const [notes, setNotes] = useState([]);
-    const [paymentMethod, setPaymentMethod] = useState('');
+    const { currency, myInfo, cartProducts, openingCash,cartStocks } = useSelector(state => state.auth );
+    const [ notes, setNotes] = useState([]);
+    const [ paymentMethod, setPaymentMethod ] = useState([]);
     const [ paidAmount, setCashAmount ] = useState(byAll.Cash + byAll.Card + byAll.Account);
-    const [paymentComplete, completePayment] = useState(false);
-    const [KartProducts, setKartProducts] = useState([]);
+    const [ KartProducts, setKartProducts] = useState([]);
+    const [ currentMethod, setCurrentMethod ] = useState('');
+   
+    const [ number, setNumber ] = useState('');
 
     const choosePaymentMethod = (method, amount=false) => {
-        if( amount ) {
-            setCashAmount(amount)
-        } else { // its the method chosen manually
-            // setCashAmount({...byAll, [method]: total})
-            // setByAll({ ...byAll, [method]: total });
-            setCashAmount( byAll.Cash+ byAll.Card + byAll.Account);
-            console.log({ ...byAll, [method]: total });
-
+        if( amount ) 
+        {
+            let previous = byAll.Cash;
+            previous = parseFloat(previous);
+            setByAll({...byAll, Cash: ( previous + parseInt(amount) ) });
+        } else {
+            let fillAmt = total - Object.values(byAll).reduce((p,c)=> p+ parseFloat(c),0);
+            if( fillAmt <= total ){
+                setByAll(() => ({ ...byAll, [method]: fillAmt.toFixed(2) }));
+            }
+            setCashAmount(() => (byAll.Cash+ byAll.Card + byAll.Account));
         }
-        setPaymentMethod(method)
+        if( !paymentMethod.includes(method) ) {
+            setPaymentMethod([ ...paymentMethod, method ]);
+        }
+        setCurrentMethod(method);
+        setNumber('');
+    }
+
+    const changeInput = input => {
+        let newAmount = number + input;  
+        setNumber(number + input);
+        setByAll({...byAll, [currentMethod]:newAmount});
     }
 
     const total = cartProducts[parseInt(active)]?.length? cartProducts[parseInt(active)].reduce( (acc, item) => acc + (item.stock * item.price), 0) : KartProducts.reduce( (acc, item) => acc + (item.stock * item.price), 0)
     
-    const initPayment = () => {
-        
+    const takeSnipAndPrint = async () => {
+        const elem = targetDiv.current;
+        if(!elem) return toast.error(`Sorry can't go further...`);
+        try {
+            const canvas = await html2canvas(elem);
+            const image = canvas.toDataURL("image/png");
+            if(window.electronAPI){
+                window.electronAPI.printContent(image);
+            } else {
+                Warning("Printer not connected!")
+            }
+            
+        } catch (error) {
+            console.error("Error capturing image:", error);
+        }
+    }
+
+    const initPayment = async () => {
+        if(total===0) {
+            return navigate('/pos')
+        }
         dispatch({ type:"LOADING" })
-        axios.post(`orders/create`, {
+        const {data} = await axios.post(`orders/create`, {
             session_id: active,
             customer_id:'',
             cash_register_id: openingCash.id,
             amount: total,
-            payment_mode: paymentMethod,
+            payment_mode: paymentMethod.toString(),
             transaction_type:'credit',
             sessionData: cartProducts[parseInt(active)].reduce(
                 (acc, { stock, id, ...rest }) => {
@@ -63,28 +99,63 @@ export default function Payment()
                 },
                 { products: [], total: 0, quantity: {} }
             )
-        }).then(({data}) => { 
-
-            completePayment(true)
+        });
+        
+        if ( receiptOn && data.status ) { 
+            await takeSnipAndPrint();
+            toast.success("Order completed!");
             setKartProducts(cartProducts[active]);
             
             localStorage.setItem('cartSessions', JSON.stringify(sessions.map( item => item + 1)));
             setSession(sessions.map( ite => ite + 1 ));
-            
-            toast.success("Order completed! You can print receipt!");
-            dispatch({type: "CHOOSEN_PRODUCT" , payload: []});
+            // let products = Object.keys(cartStocks);
+            dispatch({ type: "CHOOSEN_PRODUCT" , payload: []});
 
-        })
-        .catch(()=>{})
-        .finally(()=> dispatch(()=> dispatch({ type:'STOP_LOADING'})));
+            dispatch(
+                commonApiSlice.util.updateQueryData(`getPosProducts`, undefined, cache => {
+                    cache['products'] = cache.products.map( product => {
+                        if(cartStocks.hasOwnProperty(product.id)) {
+                            product.quantity = product.quantity - cartStocks[product.id]
+                        } 
+                        return product;
+                    })
+                }),
+            )
+            if(data.notifications.length) {
+                dispatch(
+                    commonApiSlice.util.updateQueryData('getNotifications', undefined, cache => {
+                        data.notifications.forEach( notify => { 
+                            cache['notifications'].push(notify);
+                        });
+                    })
+                )
+            }
+
+            dispatch({ type: "STOP_LOADING" })
+            navigate(`/pos`);
+            
+        } else {
+            toast.error(data.message);
+        }
 
     }
 
+    const toggleReceipt = mode => {
+        localStorage.setItem('prt_receipt', mode)
+        setReceipt(mode);
+    }
+
+    const printReceipt = async () => {
+        reactToPrintFn()
+    }
+    console.log(cartStocks)
     useEffect(() => {
         if( isSuccess ) {
             setNotes(data.notes)
         }
     },[isSuccess, data]);
+
+    const btnStyle = {minHeight:'60px'}
 
     return (
         <>
@@ -95,179 +166,132 @@ export default function Payment()
                 <div className="col-lg-5">
                     <div className="row" style={{height:'15rem'}}>
                         <div className="container">
-                            <div className="row">
-                                <div className="card ms-2 payment-cash" style={mode} onClick={()=>choosePaymentMethod('Cash')} >
-                                    <div className="card-body">
-                                        <div className="d-flex" style={{alignItems:'center',gap:'5px',color: '#1e283d'}}>
-                                            <i className="fa fa-money" aria-hidden={true} />
-                                            <strong > <p className="m-0"> Cash </p></strong>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="row mt-2">
-                                <div className="card ms-2 payment-card" style={mode} onClick={()=>choosePaymentMethod('Card')}>
-                                    <div className="card-body">
-                                        <div className="d-flex" style={{alignItems:'center',gap:'5px',color: '#1e283d'}}>
-                                            <i className="fa fa-credit-card" aria-hidden="true" />
-                                            <strong ><p className="m-0"> Card </p>  </strong>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="row mt-2">
-                                <div className="card ms-2 payment-account" style={mode} onClick={()=>choosePaymentMethod('Account')}>
+                            {[ 'Cash', 'Card', 'Account' ].map( met => <div className="row mt-2" key={met}>
+                                <div className={`card ms-2 payment-${met.toLowerCase()} ${currentMethod===met && 'active'}`} style={mode} onClick={()=> choosePaymentMethod(met)}>
                                     <div className="card-body">
                                         <div className="d-flex" style={{alignItems:'center',gap:'5px',color:'#1e283d'}}>
-                                            <i className="fa fa-user" aria-hidden="true" />
-                                            <strong > <p className="m-0"> Customer Account </p>  </strong>
+                                            { met === 'Cash' ? <i className="mdi mdi-cash" aria-hidden={true} />: null}
+                                            { met === 'Card' ? <i className="fa fa-credit-card" aria-hidden={true} />: null}
+                                            { met === 'Account' ? <i className="fa fa-user" aria-hidden={true} />: null} 
+                                            <strong> <p className="m-0"> {met} </p>  </strong>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
+                            </div>)}
                         </div>
                     </div>
                     <div className="row">
                         <div className="col-sm-12 d-flex">
-                            <button type="button" className="btn btn-light text-white cust" data-toggle="modal" data-target="#customer" style={{width:'49%',backgroundColor:'#56947d'}}>
-                                Customer
-                            </button>
-                            <button type="button" className="offset-1 btn btn-light text-dark justify-content-center" style={{width:'50%',background:'',color:'white!important'}} disabled={!paymentComplete} onClick={reactToPrintFn} title="print receipt" >
-                                <strong className='position-relative'> 
-                                    <i className="fa-solid fa-receipt position-absolute" style={{left:-25, top:-2}} /> 
-                                    Receipt 
-                                </strong>
+                            <button type="button" className=" btn btn-light text-dark w-100 mt-3 justify-content-center" style={{width:'50%',background:'',color:'white!important'}} onClick={()=>toggleReceipt(!receiptOn)} title="print receipt" > 
+                                Receipt 
+                                <input type='checkbox' checked={receiptOn} onChange={()=>{}} /> 
                             </button>
                         </div>
                     </div>
 
-                    <div className="calculator">
-                        <div className="row mt-2">
-                            <div className="col-sm-3">
-                                <button className="btn btn-light price-num w-100 text-dark"> <b> 1 </b> </button>
+                    { paymentMethod.length ? (<>
+                        <div className="calculator">
+                            <div className="row mt-2 offset-2">
+                                {[1,2,3].map( (btn,i) => <div className="col-sm-3" key={i} onClick={()=>changeInput(btn)}>
+                                    <button style={{fontSize:'1.5rem'}} className="btn btn-light  w-100 text-dark"> <b> {btn} </b> </button>
+                                </div> )}
                             </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light price-num w-100 text-dark"> <b> 2 </b> </button>
+                            <div className="row mt-1 offset-2">
+                                {[4,5,6].map( (btn,i) => <div className="col-sm-3" key={i} onClick={()=>changeInput(btn)}>
+                                    <button style={{fontSize:'1.5rem'}} className="btn btn-light  w-100 text-dark"> <b> {btn} </b> </button>
+                                </div> )}
                             </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light price-num w-100 text-dark"> <b> 3 </b> </button>
+                            <div className="row mt-1 offset-2">
+                                {[7,8,9].map( (btn,i) => <div className="col-sm-3" key={i} onClick={()=>changeInput(btn)}>
+                                    <button style={{fontSize:'1.5rem'}} className="btn btn-light  w-100 text-dark"> <b> {btn} </b> </button>
+                                </div> )}
                             </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light  w-100 text-dark"> <b> +10 </b> </button>
+                        <div className="row mt-1 offset-2">
+                            {[0, '.'].map( it => <div key={it} className={`col-sm-3 `} onClick={()=> changeInput(it)}>
+                                <button style={{fontSize:'1.5rem'}} className="btn btn-light w-100 text-dark"> <b> {it} </b> </button>
+                            </div> )}
+                            <div className="col-sm-3" onClick={()=> {
+                                setByAll({...byAll, [currentMethod]:0});
+                                setNumber('')
+                            }}>
+                                <button style={{fontSize:'1.5rem'}} className="btn btn-light w-100 text-dark"> <b> Clear </b> </button>
                             </div>
                         </div>
                         <div className="row mt-1">
-                            <div className="col-sm-3">
-                                <button className="btn btn-light price-num w-100 text-dark"> <b> 4 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light price-num w-100 text-dark"> <b> 5 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light price-num w-100 text-dark"> <b> 6 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light w-100 text-dark"> <b> +20 </b> </button>
+                            <div className="col-sm-12 d-flex">
+                                <button type={`button`} className={`w-100 btn btn-light text-white validate`} style={{width:'47%',backgroundColor: '#0d172c',opacity:1}} onClick={initPayment}>
+                                    Complete Payment
+                                </button>
                             </div>
                         </div>
-                        <div className="row mt-1">
-                            <div className="col-sm-3">
-                                <button className="btn btn-light price-num w-100 text-dark"> <b> 7 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light price-num w-100 text-dark"> <b> 8 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light price-num w-100 text-dark"> <b> 9 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light w-100 text-dark"> <b> +50 </b> </button>
-                            </div>
                         </div>
-                    </div>
-
-                    <div className="row mt-1">
-                        <div className="col-sm-3">
-                            <button className="btn btn-light w-100 text-dark"> <b> +/- </b> </button>
-                        </div>
-                        <div className="col-sm-3">
-                            <button className="btn btn-light num w-100 text-dark"> <b> 0 </b> </button>
-                        </div>
-                        <div className="col-sm-3">
-                            <button className="btn btn-light w-100 text-dark"> <b> . </b> </button>
-                        </div>
-                        <div className="col-sm-3">
-                            <button className="btn btn-light w-100 text-dark"> <b className="fa fa-close">  </b> </button>
-                        </div>
-                    </div>
-                    <div className="row mt-1">
-                        <div className="col-sm-12 d-flex">
-                            <button type={`button`} className={`w-100 btn btn-light text-white validate`} style={{width:'47%',backgroundColor: '#0d172c',opacity:1}} onClick={initPayment}>
-                                Validate
-                            </button>
-                        </div>
-                    </div>
+                    </>)
+                    : null }
                 </div>
                 <div className="final col-lg-6">
                     <div className="card">
                         <div className="card-body">
                             <h1 className="text-success" style={{textAlign:'center'}}>
-                                <span className="total-amount">{currency + total}</span>
+                                <span className="total-amount">{currency + parseFloat(total).toFixed(2)}</span>
                             </h1>
                         </div>
                     </div>
                     <div className="card mt-3 w-100 parent">
-                        <div className="d-flex selections">
-                            <strong className={`${paymentMethod && 'd-none'}`}>
+                        <div className="row selections">
+                            <strong className={`${paymentMethod.length && 'd-none'}`}>
                                 <span className="info"> Please select a payment method </span>
                             </strong>
-                            {paymentMethod && (
+                            {paymentMethod.length ? (
                                 <>
-                                    { total < paidAmount || total === paidAmount ? (<div className={`card fulfilled`} >
+                                    { total < Object.values(byAll).reduce((p,c)=> p+parseFloat(c),0) || total === paidAmount ? (<div className={`card fulfilled`} >
                                         <div className="card-body exception">
-                                            <div className="d-flex" style={{ justifyContent:'space-between' }}>
+                                            <div className="d-flex" style={{ justifyContent:'space-between'}}>
                                                 <div className="d-flex">
-                                                    <i className="fa-solid fa-cash" />
-                                                    <p>Return </p>
+                                                    <i className={`fa-solid fa-cash`} />
+                                                    <p> Return </p>
                                                 </div>
-                                                <b>&nbsp; {currency} {Math.abs((total - paidAmount).toFixed(2))}</b>
+                                                <b>&nbsp; {currency} {Math.abs((total - Object.values(byAll).reduce((p,c)=> p+parseFloat(c),0)).toFixed(2))}</b>
                                             </div>
                                         </div>
                                     </div>) : (
                                         <div className={`card remaining`}>
-                                            <div className="card-body exception">
+                                            <div className={`card-body exception`}>
                                                 <div className="d-flex" style={{ justifyContent:'space-between' }}>
                                                     <div className="d-flex">
-                                                        <i className="fa-solid fa-cash" />
+                                                        <i className={`fa-solid fa-cash`} />
                                                         <p>Remaining </p>
                                                     </div>
-                                                    <b>&nbsp; {currency} {Math.abs((total - paidAmount).toFixed(2))}</b>
+                                                    <b>&nbsp; {currency} {Math.abs((total - Object.values(byAll).reduce((p,c)=> p+ parseFloat(c),0)).toFixed(2))}</b>
                                                 </div>
                                             </div>
                                         </div>
                                     )}
-                                    <div className="card methods payment-cash active" onclick="selectMethod(this)">
-                                        <div className="card-body exception">
-                                            <div className="d-flex" style={{justifyContent:'space-between'}}>
-                                                <div className="d-flex">
-                                                    <i className="fa-solid fa-cash" />
-                                                    <p> { paymentMethod } </p>
-                                                </div>
-                                                <div className="d-flex">
-                                                    <b className="price" data-paid={paidAmount}> &nbsp;{currency} { paidAmount ? paidAmount: total }</b>
-                                                    <i className="mdi mdi-close mx-3" style={{cursor:'pointer'}} onClick={()=>setPaymentMethod('')} />
+                                    {
+                                        paymentMethod.map( meth => <div className={`card methods payment-${meth.toLowerCase()} ${currentMethod===meth && 'active'}`} key={meth} onClick={()=> setCurrentMethod(meth)}>
+                                            <div className={`card-body exception`} >
+                                                <div className="d-flex" style={{justifyContent:'space-between'}}>
+                                                    <div className="d-flex"> 
+                                                        <p> { meth } </p>
+                                                    </div>
+                                                    <div className="d-flex">
+                                                        &nbsp;{currency} &nbsp;<b className="price" data-paid={paidAmount}> {byAll[meth]}</b>
+                                                        <i className="mdi mdi-close mx-3" style={{cursor:'pointer'}} onClick={()=>setPaymentMethod(()=>{ 
+                                                            setByAll({...byAll, [meth]:0})
+                                                            return paymentMethod.filter(ite => ite !== meth)
+                                                        })} />
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </div>
+                                        </div>) 
+                                    }
                                 </>
-                            )}
+                            ): null}
                         </div>
                     </div>
                     <div className={`container`}>
                         <div className={`row`}>
                             {notes.map((note) => (
-                                <div className="col-sm-4 mt-1" style={{maxHeight:'110px',cursor:'pointer'}} onClick={()=>choosePaymentMethod('Cash', note.amount)}>
+                                <div className="col-sm-4 mt-1" key={note.id} style={{maxHeight:'110px',cursor:'pointer'}} onClick={()=>choosePaymentMethod('Cash', note.amount)}>
                                     <img src={process.env.REACT_APP_BACKEND_URI+'images/'+note.image} alt={''} style={{width:'100%',height:'100%',borderRadius:'10px'}} />
                                 </div>
                             ))}
@@ -281,8 +305,9 @@ export default function Payment()
                     <div id="payment-status-container" />
                 </div>
             </div>
+            {/* Receipt Area */}
             <div className="col-lg-6 d-none" id="receipt" ref={componentRef}>
-                <div className="container" style={{backgroundColor:'white',paddingBottom:'40px',borderRadius:'15px'}} >
+                <div className="container" ref={targetDiv} style={{backgroundColor:'white',paddingBottom:'40px',borderRadius:'15px'}} >
                     <div className="row d-flex" >
                         <div className="d-grid text-center w-100" style={{justifyContent:'center'}}>
                             <img src={pos} alt="" style={{height:'150px',width:'300px'}} />
@@ -295,8 +320,7 @@ export default function Payment()
                     <div className="row">
                         <div className="receipt" style={{width:'90%',background:'#fff',marginLeft:'5%'}}>
                             {
-                                KartProducts.map( product => {
-                                   return <div key={product.id} className='row mt-2 choosen-product receipt'>
+                                cartProducts[active]?.map( product => <div key={product.id} className='row mt-2 choosen-product receipt'>
                                         <div className='d-flex w-100'>
                                             <b>{product.name}</b>
                                             <strong className='price' style={{fontFamily:'cursive'}}>
@@ -308,7 +332,7 @@ export default function Payment()
                                             {!product.other && <p className='ms-3 mt-1'> x {currency + '' + product.price} / Units </p>}
                                         </div>
                                     </div>
-                                })
+                                )
                             }
                             <div >
                                 <p className="text-center"> ------------------------------ </p>
@@ -324,7 +348,7 @@ export default function Payment()
                                 </div>
                                 <div className="row d-flex mt-0" style={{justifyContent:'space-between'}}>
                                     <div>
-                                        <small> { capitalFirst(paymentMethod) } </small>
+                                        <small> { capitalFirst(paymentMethod[0]??'') } </small>
                                     </div>
                                     <div>
                                         <small> {currency+ '' + total.toFixed(2) } </small>

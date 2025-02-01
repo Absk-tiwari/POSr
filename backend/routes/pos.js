@@ -7,7 +7,7 @@ const router = express.Router();
 const fetchuser= require('../middlewares/loggedIn');
 const { getCurrentDate } = require("../utils");
 
-router.get('/products', fetchuser , async(req, res) => {
+router.get('/products/:img', fetchuser , async(req, res) => {
 
     let products;
     const cols = [
@@ -18,9 +18,12 @@ router.get('/products', fetchuser , async(req, res) => {
         'category_id',
         'weight',
         'sales_desc',
-        'image',
+        'tax',
         'quantity'
     ];
+    if(req.params.img!='false'){ 
+        cols.push('image')
+    }
 
     if (req.body.category_id && req.body.category_id !== 'all') {
         products = await Product.query().where('pos', true).where('category_id', req.body.category_id).orderBy('quantity', 'desc').select(cols).withGraphFetched().modifyGraph('category', (builder) => {
@@ -35,7 +38,7 @@ router.get('/products', fetchuser , async(req, res) => {
             );
         });
     }
-    return res.json({ status:true, products: products.map(({ category: { catName }, ...rest }) => ({ ...rest, catName })) })
+    return res.json({ status:true, products: products.map(({ category, ...rest }) => ({ ...rest, catName: category ? category.catName : null })) })
 
 });
 

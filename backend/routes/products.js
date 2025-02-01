@@ -14,7 +14,6 @@ const upload = require('../middlewares/multer');
 const { buffer } = require("stream/consumers");
 
 let error = { status : false, message:'Something went wrong!' }
-let output = { status : true }
 
 const normalizeSpaces = (str) => {
     return str.replace(/\s+/g, ' ').trim();
@@ -29,6 +28,7 @@ router.get('/', async (req,res) => {
             'price',
             'code',
             'weight',
+            'tax',
             'sales_desc',
             'image',
             'quantity',
@@ -42,13 +42,19 @@ router.get('/', async (req,res) => {
                 );
             });
         } else {
-            products = await Product.query().orderBy('quantity', 'desc').select(cols).withGraphFetched('category').modifyGraph('category', (builder) => {
+            products = await Product.query().orderBy('id', 'desc').select(cols).withGraphFetched('category').modifyGraph('category', (builder) => {
                 builder.select(
                   'product_categories.name as catName'
                 );
             });
         }
-        return res.json({ status:true, products: products.map(({ category: { catName }, ...rest }) => ({ ...rest, catName })) })
+        return res.json({ status:true, products: products.map( item => {
+            if(item.category) {
+                item.catName = item.category.catName
+                delete item.category
+            }
+            return item
+        }) })
 
     } catch (e) {
         console.log("exception occured: ",e)
@@ -71,18 +77,44 @@ router.post(`/updateStock/:id`, async (req, res)=> {
 });
 
 // Route 3 : Get logged in user details - login required
-router.post('/create', fetchuser, async(req, res) =>{
+router.post('/create', [upload.single('image'), fetchuser ], async(req, res) =>{
     try { 
 
-        const tax = await Product.query().insert({
-            // name: req.body.name,
-            // amount: req.body.amount??0,
-            // status: req.body.status??true,
-        });
+        const existing = await Product.query().where('code',req.body.barcode).first()
+        if(existing) {
+            return res.json({status:false, message:"This barcode already exists!"});
+        }
+        const payload = {
+            name: req.body.name,
+            price: req.body.price??0,
+            code: req.body.barcode,
+            category_id: req.body.category_id,   
+        }
+        const category = await ProductCategory.query().where('id', req.body.category_id).first();
+        if(req.file)
+        {
+            const {filename} = req.file;
+            const updatedFilename = `${Date.now()}-${filename.slice(0,-5)}.webp`;
 
-        return res.json({status:true, tax }); 
+            const outputPath = path.join('tmp/products', updatedFilename.replace(/\s+/g, '').trim());
+    
+            await sharp(req.file.path)
+            .resize(400,400, {
+                fit: 'inside'
+            })
+            .webp({ quality:50 })
+            .toFile(outputPath);
+            fs.unlinkSync(`tmp/${req.body.image}`);
+            fs.unlinkSync(req.file.path);
+            payload.image = `products/`+ updatedFilename.replace(/\s+/g, '').trim();
+        }
+
+        const product = await Product.query().insertAndFetch(payload);
+
+        return res.json({status:true, message:"Product added successfully!", product: category? {...product, catName: category.name}: product }); 
 
     } catch (e) {
+        console.log(e.message)
         error.message = e.message
         return res.status(500).json(error)     
     }
@@ -109,8 +141,11 @@ router.post('/import', [ upload.single('file'), fetchuser ], async(req, res) => 
             }
 
             // Step 2: Find or create the product with the barcode
-            let path = await downloadAndProcessImage(row.Images)
-            path = 'products/'+path;
+            let path=null
+            if(row.Images){
+                path = await downloadAndProcessImage(row.Images)
+                path = 'products/'+path;
+            }
 
             await Product.query().insertGraph({
                 code: row.Barcode,
@@ -118,7 +153,7 @@ router.post('/import', [ upload.single('file'), fetchuser ], async(req, res) => 
                 type: row['Product Type'],
                 price: row['Sales Price'],
                 sales_desc: row['Sales Description'],
-                image: path ?? row.Images,  // Use the uploaded path or the default image from Excel
+                image: path,  // Use the uploaded path or the default image from Excel
                 category_id: category.id ?? null,  // Associate with the category
                 tax: row['Customer Taxes'] ?? null,  // Handle optional tax field
             });
@@ -240,6 +275,15 @@ router.get(`/update-product-pos/:id/:status`, async(req, res)=> {
     }
 });
 
+router.get(`/barcode/:code`, async(req, res) => {
+    try {
+        const product = await Product.query().where('code', req.params.code).first();
+        return res.json({status:product.length, product});
+    } catch (error) {
+        return res.json({status:false, product:{}});   
+    }
+})
+
 router.post('/convert', async(req, res) => {
     const resp = axios({
         method:"GET",
@@ -262,5 +306,109 @@ router.post('/convert', async(req, res) => {
     .toFile(path.join('tmp/converted', fileName ));
     return res.json({status:true});
 });
+
+router.post(`/create-custom`, upload.single('image'), async(req,res) => {
+    try {
+        const payload = {
+            name: req.body.name,
+            price: req.body.price,
+            code: req.body.barcode
+        }
+        const existing = await Product.query().where('code', req.body.barcode).first();
+        if(existing) {
+            return res.json({
+                status:false, 
+                message:"A product with this barcode already exists!", 
+                product:{}
+            });
+        }
+        if(req.file){ 
+ 
+            const {filename} = req.file;
+            const updatedFilename = `${Date.now()}-${filename.slice(0,-5)}.webp`;
+
+            const outputPath = path.join('tmp/products', updatedFilename.replace(/\s+/g, '').trim());
+    
+            await sharp(req.file.path)
+            .resize(400,400, {
+                fit: 'inside'
+            })
+            .webp({ quality:50 })
+            .toFile(outputPath);
+    
+            fs.unlinkSync(`tmp/${req.body.image}`);
+            fs.unlinkSync(req.file.path);
+            body.image = `products/`+ updatedFilename.replace(/\s+/g, '').trim();
+      
+        }
+        const product = await Product.query().insert(payload);
+
+        res.json({status:true, message:"Product has been added!", product})
+    } catch (error) {
+        console.log(`exception while syncing: `+error.message)
+        return res.json({status:false, message:error.message, product:{}})
+    }
+})
+
+router.post('/sync', [ upload.single('file'), fetchuser ], async(req, res) => {
+    try 
+    { 
+        const data = fs.readFileSync(req.file.path, 'utf-8');
+        let products = data.split('\n');
+        products = products.map( pr => pr.length? JSON.parse(pr): pr)
+
+        for (const line in products) {
+
+            if (products[line]) { 
+                const row = products[line];
+                
+                if(row){
+
+                    let catName 
+                    if(row.category) {
+                        catName = normalizeSpaces(row.category)
+                    }
+                    let category = await ProductCategory.query().findOne({ name: catName });
+    
+                    if (!category) {
+                        category = await ProductCategory.query().insert({ name: catName });
+                    }
+                    let product = await Product.query().where('code', row.barCode).first()
+                    if(product) {
+                        await Product.query().findById(product.id).patch({
+                            name: row.name,
+                            price: (row.price).replace(",", "."),
+                            category_id: category.id,
+                            quantity: row.quantity,
+                            tax: row.tax
+                        })
+                    } else {
+                        await Product.query().insertGraph({
+                            code: row.barCode?? row.name,
+                            name: row.name,
+                            type: null,
+                            price: (row.price).replace(",", "."),
+                            sales_desc: null,
+                            image: null,
+                            category_id: category.id ?? null,
+                            tax: row.tax ?? null,  // Handle optional tax field
+                            quantity: row.quantity
+                        });                
+                    }
+
+                }
+
+            }
+        }
+       
+        // res.status(200).send('Data successfully imported to the database!');
+        return res.json({ status:true, message: 'Products successfully imported!', products : products.map( pr => pr.length? JSON.parse(pr): pr)}); 
+
+    } catch (e) {
+        error.message = e.message
+        console.log(error.message)
+        return res.status(500).json(error)     
+    }
+}); 
 
 module.exports=router 

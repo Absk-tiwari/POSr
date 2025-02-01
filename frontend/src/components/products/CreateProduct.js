@@ -2,17 +2,29 @@ import React, { useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux';
 import {useNavigate} from 'react-router-dom';
 import toast from 'react-hot-toast'
-import product from '../../asset/images/product.png';
+import product from '../../asset/images/default.png';
 import GIF from '../../asset/images/progress.gif';
 import xlsImg from '../../asset/images/xls.png';
 import axios from 'axios';
+import { Warning } from '../../helpers/utils';
+import { commonApiSlice, useGetPosProductsQuery, useGetProductCategoriesQuery, useGetProductsQuery } from '../../features/centerSlice';
 
 function CreateProduct() {
     const { currency }= useSelector(state => state.auth);
+    const [ categories , setCategories] = useState([])
+    const { refetch } = useGetPosProductsQuery();
+    const { refetch: refetchOrg} = useGetProductsQuery()
+    const { refetch: refetchCat } = useGetProductCategoriesQuery()
+    const [ taxes , setTaxes] = useState([])
     const input = {borderRadius: '25px'};
     const dispatch = useDispatch();
     const [xls, noteFile] = useState(null);
-    const navigate = useNavigate()
+    const navigate = useNavigate();
+    const [fields, setFields] = useState({name:'',price:'',category_id:'',barcode:'',tax:'',image:null})
+
+    const handleFile =e => {
+        setFields({...fields, image: e.target.files[0]??null })
+    }
 
     const importXl = e => {
 
@@ -32,6 +44,9 @@ function CreateProduct() {
             }
         }).then(({data}) => {
             if(data.status) {
+                refetch()
+                refetchOrg()
+                refetchCat()
                 navigate('/products');
                 return toast.success(data.message);
             }
@@ -41,7 +56,76 @@ function CreateProduct() {
 
     }
 
-    useEffect(()=> { },[])
+    const change = e => {
+        setFields({...fields, [e.target.name]: e.target.value })
+    }
+    const addProduct = async e => {
+        e.preventDefault();
+        if(!fields.name || !fields.barcode || !fields.price) {
+            return Warning("Fill the required fields")
+        }
+        let fd = new FormData();
+        for (const field in fields) {
+            fd.append(field, fields[field])
+        }
+        dispatch({type:"LOADING"})
+
+        try {
+            const {data} = await axios.post(`/products/create`, fd, {
+                headers:{ 
+                    "Accept"       :"application/json",
+                    "Content-Type" : "multipart/form-data",
+                    "pos-token"    : localStorage.getItem('pos-token')
+                }
+            })
+            if(data.status) {
+                toast.success(data.message)
+                dispatch(
+                    commonApiSlice.util.updateQueryData('getPosProducts', undefined, cache => {
+                        if(cache['products']){
+                            cache['products'].unshift(data.product)
+                        }
+                    })
+                )
+                dispatch(
+                    commonApiSlice.util.updateQueryData('getProducts', undefined, cache => {
+                        if(cache['products']){
+                            cache['products'].unshift(data.product)
+                        }
+                    })
+                )
+                dispatch({type:"STOP_LOADING"})
+                navigate('/products')
+            } else {
+                toast.error(data.message)
+            }
+        } catch (error) {
+            console.log(error)    
+        }
+        dispatch({type:"STOP_LOADING"})
+    }
+
+    const getCategories = ()=> {
+        axios.get('category').then(({data}) => {
+            if(data.status){ 
+                setCategories(data.categories)
+            }
+        })
+    }
+    const getTaxes = ()=> {
+        axios.get('tax').then(({data}) => {
+            if(data.status){ 
+                setTaxes(data.taxes)
+            }
+        })
+    }
+
+    useEffect(()=> { 
+        getCategories();
+        getTaxes();
+
+        return ()=> null
+    },[])
 
     function putFile(e){
         e.preventDefault();
@@ -60,21 +144,21 @@ function CreateProduct() {
                         <div className="card-body">
                             <div className="row" id="hider">
                                 <div className="col-6">
-                                    <form id="addProduct" action="{{ route('products.add') }}" method="POST" encType="multipart/form-data">
+                                    <form onSubmit={addProduct} >
                                         <div className="card-body">
                                             <div className="row" style={{width:'100%'}} >
                                                 <div className="col-10">
                                                     <div className="form-group">
                                                         <label htmlFor="product_name" className="fs-5"> Product </label> <br/>
-                                                        <textarea name="product_name" id="product_name" className="form-control" style={input} placeholder="e.g. somethin"></textarea>
+                                                        <textarea name="name" onChange={change} id="product_name" className="form-control" style={input} placeholder="e.g. somethin"></textarea>
                                                     </div>
                                                 </div>
                                                 <div className="col-2">
                                                     <div className="form-group">
                                                         <label htmlFor="product_image" >
                                                             <img src={product} alt="" className="label-img"/>
-                                                        </label> <br/>
-                                                        <input name="image" id="product_image" accept="image/*" type="file" className="d-none" />
+                                                        </label>
+                                                        <input name="image" id="product_image" onChange={handleFile} accept="image/*" type="file" className="d-none" />
                                                     </div>
                                                 </div>
                                             </div>
@@ -86,8 +170,9 @@ function CreateProduct() {
                                                             Category
                                                         </div>
                                                         <div className="col-8">
-                                                            <select name="category_id" className="form-control" style={input}>
+                                                            <select name="category_id" onChange={change} className="form-control" style={input}>
                                                                 <option value=""> Choose </option>
+                                                                {categories.map( opt => <option key={opt.id} value={opt.id}>{opt.name}</option>)}
                                                             </select>
                                                         </div>
                                                     </div>
@@ -96,7 +181,7 @@ function CreateProduct() {
                                                             Sales Taxes
                                                         </div>
                                                         <div className="col-8">
-                                                            <select name="tax[]" className="form-control" id="" multiple>
+                                                            <select name="tax" onChange={change} className="form-control" id="" >
                                                                 <option value="">Choose</option>
                                                             </select>
                                                         </div>
@@ -106,7 +191,7 @@ function CreateProduct() {
                                                             Price
                                                         </div>
                                                         <div className="col-8">
-                                                            <input type="text" pattern="^\d+(\.\d+)?$" title="Price should be number" name="price" className="form-control" id="" placeholder={currency} style={input}/>
+                                                            <input type="text" pattern="^\d+(\.\d+)?$" onChange={change} title="Price should be number" name="price" className="form-control" id="" placeholder={currency} style={input}/>
                                                         </div>
                                                     </div>
 
@@ -115,7 +200,7 @@ function CreateProduct() {
                                                             Barcode
                                                         </div>
                                                         <div className="col-8">
-                                                            <input type="text" name="barcode" placeholder='Barcode here..' style={input} className="form-control" id=""/>
+                                                            <input type="text" name="barcode" onChange={change} placeholder='Barcode here..' style={input} className="form-control" id=""/>
                                                         </div>
                                                     </div>
 

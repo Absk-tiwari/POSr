@@ -1,25 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 import $ from "jquery";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { Form, Modal, ModalBody, ModalFooter, ModalHeader } from 'reactstrap'
-import { useDeleteProductMutation, useGetProductCategoriesQuery, useGetProductsQuery, useGetTaxesQuery, useUpdateProductMutation } from "../../features/centerSlice";
-import { chunk, wrapText } from "../../helpers/utils";
+import { commonApiSlice, useDeleteProductMutation, useGetProductCategoriesQuery, useGetProductsQuery, useGetTaxesQuery } from "../../features/centerSlice";
+import { Warning, wrapText } from "../../helpers/utils";
 import toast from "react-hot-toast";
 import axios from "axios";
 import { preview } from "../../helpers/attachments";
+import labelImg from "../../asset/images/default.png";
 
 const Products = () => {
 
     const listtableRef = useRef();
     const tableRef = useRef();
     const selectRef = useRef();
-
+    const dispatch = useDispatch()
 
     const {data:categories, isSuccess:catSuccess} = useGetProductCategoriesQuery();
     const {data:taxess, isSuccess:taxAaGaya} = useGetTaxesQuery();
-    // const [ updateProduct ] = useUpdateProductMutation();
     const [ deleteProduct ] = useDeleteProductMutation();
-    // console.log(deleteProduct)
 
     const [rowData, setRowData] = useState([]);
     const {currency } = useSelector( state=> state.auth );
@@ -49,10 +48,9 @@ const Products = () => {
     const refer = e =>{ 
         let {img} = e.target.dataset;
         preview([img], true)
-        // let a = document.createElement('a');
-        // a.href = 'http://localhost:5000/images/'+img;
-        // a.target = "_blank";
-        // a.click()
+    }
+    const handleImgError = e => {
+        e.target.src = labelImg
     }
 
     const handleProductUpdate = async(e) => {
@@ -69,16 +67,38 @@ const Products = () => {
                     'pos-token' : localStorage.getItem('pos-token')
                 }
             });
-            console.log(data);
-
+            if(data.status) {
+                toast.success("Product updated!")
+                console.log(editingProduct);
+                dispatch(
+                    commonApiSlice.util.updateQueryData('getProducts', undefined, (draft) => {
+                        const {products} = draft
+                        const {updated} = data;
+                        const index = products.findIndex((item) => item.id === parseInt(updated.id));
+                        if (index !== -1) {
+                            draft['products'][index] = updated;
+                            draft['products'][index]['catName'] = cats.find( c => c.id === updated.category_id).name;    
+                        }
+                    })
+                ); 
+                dispatch(
+                    commonApiSlice.util.updateQueryData('getPosProducts', undefined, draft => {
+                        const {products} = draft
+                        const {updated} = data;
+                        const index = products.findIndex((item) => item.id === parseInt(updated.id));
+                        if (index !== -1) draft['products'][index] = updated; // Update the item in the cache
+                    })
+                )
+            } else {
+                toast.error(data.message); 
+            }
         } catch (error) {
-            console.log(`Exception on first sight`, error.message)
-            toast.error(`Exception on first sight`);
+            toast.error(`Exception`);
+            console.log(error)
         }
         
     }
   
-    const [ hovered, setHovered ] = useState('');
     const toggleModal = () => setModal(!modal)
 
     const edit = (e) => {
@@ -93,6 +113,7 @@ const Products = () => {
             const {id} = e.target.dataset;
             try {
                 await deleteProduct({id}).unwrap(); 
+                dispatch({ type:"RESET_KART" }) // the product could be already chosen in one
             } catch (error) {
                 console.log(error.message);
             }
@@ -106,6 +127,7 @@ const Products = () => {
         width: '145px'
     }
 
+
     useEffect(()=> {
         if(catSuccess){
             setCats(categories.categories)
@@ -117,26 +139,177 @@ const Products = () => {
     },[taxess, taxAaGaya])
 
     useEffect(() => {
-        $(tableRef.current).DataTable({
-        //   paging: true,
-          searching: true,
-          info: true,
-          ordering: true,
-          pageLength:40
-        });
+        if(rowData.length) {
+            $(tableRef.current).DataTable({
+            //   paging: true,
+              data: rowData,
+              columns: [
+                { 
+                    title: "",
+                    render: (data, type, row) => {
+                        return `<div class="card-body d-flex grid-view">
+                            <div class="col-9 d-block" >
+                                <div class="row">
+                                    <strong class="wrapped-text">${wrapText(row.name, 50)}<span class="${row.name?.length > 28? 'tooltiptext':`d-none`}">${row.name}</span></strong>
+                                </div>
+                                <div class="row mt-2" >
+                                    <p> Price: ${currency+' '+row?.price}
+                                        <button class="btn btn-sm ms-2" style="border:1px solid gray"
+                                            onclick="()=> printBarcode(${row?.code})" >
+                                            <i class="fa-solid fa-barcode" style="font-size:1rem"></i>    
+                                        </button>
+                                    </p>
+                                </div> 
+                            </div>
+                            <div class="col-3 text-center position-relative">
+                                <img src="http://localhost:5100/images/${row.image}" onerror="this.src='${labelImg}'" alt=''/>
+                                <div class='image-container d-none' style="background-image:url(http://localhost:5100/images/${row.image}); background-size:cover;background-repeat:no-repeat" />
+                                
+                            </div>
+                        </div>`
+                    }
+                }, 
+                { 
+                    title: "",
+                    render: (data, type, row) => {
+                        return `<div class="card-body d-flex grid-view">
+                            <div class="col-9 d-block" >
+                                <div class="row">
+                                    <strong class="wrapped-text">${wrapText(row.name, 50)}<span class="${row.name.length > 28? 'tooltiptext':`d-none`}">${row.name}</span></strong>
+                                </div>
+                                <div class="row mt-2" >
+                                    <p> Price: ${currency+' '+row.price}
+                                        <button class="btn btn-sm ms-2" style="border:1px solid gray"
+                                            onclick="()=> printBarcode(${row.code})" >
+                                            <i class="fa-solid fa-barcode" style="font-size:1rem"></i>    
+                                        </button>
+                                    </p>
+                                </div> 
+                            </div>
+                            <div class="col-3 text-center position-relative">
+                                <img src="http://localhost:5100/images/${row.image}" onerror="this.src='${labelImg}'" alt=''/>
+                                <div class='image-container d-none' style="background-image:url(http://localhost:5100/images/${row.image}); background-size:cover;background-repeat:no-repeat" />
+                                
+                            </div>
+                        </div>`
+                    }
+                }, 
+                { 
+                    title: "",
+                    render: (data, type, row) => {
+                        return `<div class="card-body d-flex grid-view">
+                            <div class="col-9 d-block" >
+                                <div class="row">
+                                    <strong class="wrapped-text">${wrapText(row.name, 50)}<span class="${row.name.length > 28? 'tooltiptext':`d-none`}">${row.name}</span></strong>
+                                </div>
+                                <div class="row mt-2" >
+                                    <p> Price: ${currency+' '+row.price}
+                                        <button class="btn btn-sm ms-2 bcode" style="border:1px solid gray"
+                                            onclick="()=> printBarcode(${row.code})" >
+                                            <i class="fa-solid fa-barcode" style="font-size:1rem"></i>
+                                        </button>
+                                    </p>
+                                </div> 
+                            </div>
+                            <div class="col-3 text-center position-relative">
+                                <img src="http://localhost:5100/images/${row.image}" onerror="this.src='${labelImg}'" alt=''/>
+                                <div class='image-container d-none' style="background-image:url(http://localhost:5100/images/${row.image}); background-size:cover;background-repeat:no-repeat" />
+                            </div>
+                        </div>`
+                    }
+                }
+              ],
+              searching: true,
+              info: true,
+              processing:true,
+              ordering: true,
+              lengthMenu:[ 10,25,50]
+            });
+            $(tableRef.current).on('click', '.image-container', e => refer(e))
+            $(tableRef.current).on('click', '.bcode.btn', e => printBarcode(e.target.dataset.code))
+        }
         $.fn.DataTable.ext.errMode = 'none';
-      }, [view]);
+        return () => $(tableRef.current).DataTable().destroy();
+
+      }, [view, rowData]);
 
     useEffect(() => {
-        $(listtableRef.current).DataTable({
-            paging: true,
-            searching: true,
-            info: true,
-            ordering: true,
-            pageLength:40
-        });
+        if(rowData.length) {
+            $(listtableRef.current).DataTable({
+                data: rowData,
+                columns: [
+                    /*
+                    
+                    Action*/
+                    { data: "name", title: "Name" },
+                    { data: "catName", title: "Category" },
+                    { 
+                        data: null, 
+                        title: "Price",
+                        render: (data,type, row) => {
+                            return `${currency} ${row.price}`
+                        }
+                    },
+                    { data: "code", title: "Barcode" },
+                    { data: "weight", title: "Weight" },
+                    {   
+                        data: null, 
+                        title: "Description",
+                        render: (data, type, row) => {
+                            return `
+                                <p class="wrapped-text">
+                                    ${wrapText(row.sales_desc??'', 25)}
+                                    <span class="${row.sales_desc?.length > 28? 'tooltiptext':`d-none`}">${row.sales_desc}</span>
+                                </p>
+                            `
+                        }
+                    },
+                    {   
+                        data: null,
+                        title: "Image",
+                        render: (data, type, row) => {
+                            return `<div class="position-relative img">
+                                <img 
+                                    class='img-fluid img-thumbnail'
+                                    src="http://localhost:5100/images/${row.image}" 
+                                    alt=''
+                                    data-img="${row.image}"
+                                    onerror="this.src='${labelImg}'"
+                                />
+                            </div>`
+                        },
+
+                    },
+                    {
+                      data: null, // No direct data, render custom content
+                      title: "Actions",
+                      render: (data, type, row) => {
+                        return `
+                          <button class="edit-list btn btn-success btn-sm btn-rounded" data-id="${row.id}">Edit</button>
+                          <button class="barcode-list btn btn-success btn-sm btn-rounded" data-code="${row.code}">Barcode</button>
+                          <button class="delete-list btn btn-danger btn-sm btn-rounded" data-id="${row.id}">Delete</button>
+                        `;
+                      },
+                    },
+                ],
+                paging: true,
+                searching: true,
+                processing:true,
+                info: true,
+                ordering: true,
+                lengthMenu:[ 10,25,50]
+            });
+
+            $(listtableRef.current).on('click', '.edit-list.btn', e => {
+                edit(e)
+            })
+            $(listtableRef.current).on('click', '.barcode-list.btn', e => printBarcode(e.target.dataset.code))
+            $(listtableRef.current).on('click', '.delete-list.btn', e => removeProduct(e))
+            $(listtableRef.current).on('click', '.img-thumbnail', e => refer(e))
+        }
         $.fn.DataTable.ext.errMode = 'none';
-    }, [view]);
+        return () => $(listtableRef.current).DataTable().destroy();
+    }, [view, rowData]);
 
     const handleView = view => {
         if(view==='grid') {
@@ -145,6 +318,14 @@ const Products = () => {
             $(tableRef.current).DataTable().destroy();
         }
         setView(view)
+    }
+
+    const printBarcode = (code) => {
+        if(window.electronAPI) {
+            window.electronAPI.generateBarcode(code)
+        } else {
+            Warning("Connect to a printer first!")
+        }
     }
    
     useEffect(()=> {
@@ -159,7 +340,7 @@ const Products = () => {
         <div className="row w-100 h-100 mt-4"> 
             <div className="col-lg-12 grid-margin stretch-card"> 
                 <div className="card">
-                    <div className="card-header" onMouseEnter={()=>setHovered('')}>
+                    <div className="card-header" >
                             <div style={{display:'flex',alignItems:'end',justifyContent:'space-between'}}>
                             <div/> 
                             <div className="d-flex flex-end" style={{width:'140px',justifyContent:'space-around',alignItems:'center'}}>
@@ -169,90 +350,9 @@ const Products = () => {
                         </div>
                     </div>
                     <div className="card-body">
-                        {view==='list' && <table className='table' ref={listtableRef}>
-                            <thead onMouseEnter={()=>setHovered('')}>
-                                <tr>
-                                    <th> Name</th>
-                                    <th> Category</th>
-                                    <th> Price</th>
-                                    <th> Barcode</th>
-                                    <th> Weight</th>
-                                    <th> Description</th> 
-                                    <th> Image</th>
-                                    <th> Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rowData?.map( row => <tr key={row.id}> 
-                                    <td onMouseEnter={()=>setHovered('')}>{row.name}</td>
-                                    <td onMouseEnter={()=>setHovered('')}>{row.catName}</td>
-                                    <td onMouseEnter={()=>setHovered('')}>{currency +' '+row.price}</td>
-                                    <td onMouseEnter={()=>setHovered('')}>{row.code}</td>
-                                    <td className='position-relative' onMouseEnter={()=>setHovered('')}>
-                                        {row.weight}
-                                    </td>
-                                    <td onMouseEnter={()=>setHovered('')}>
-                                        <p className="wrapped-text">
-                                            {wrapText(row.sales_desc, 25)}
-                                            <span className={row.sales_desc?.length > 28? 'tooltiptext':`d-none`}>{row.sales_desc}</span>
-                                        </p>
-                                    </td>
-                                    <td className='position-relative img'>
-                                        <img 
-                                            className='img-fluid img-thumbnail'
-                                            src={`http://localhost:5000/images/${row.image}`} 
-                                            onMouseEnter={()=>setHovered(row.id)}
-                                            alt=''
-                                        />
-                                        {
-                                            hovered === row.id && <div className='image-container' onClick={refer} data-img={row.image} style={{backgroundImage:`url('http://localhost:5000/images/${row.image}')`, backgroundSize:'cover', backgroundRepeat:'no-repeat'}} />
-                                        }
-                                    </td>
-                                    <td onMouseEnter={()=>setHovered('')}>
-                                        <div className="action-plate d-flex" style={{justifyContent:'space-between',gap:4}} >
-                                            <button className="btn btn-sm btn-success" data-id={row.id} onClick={edit} > Edit </button>
-                                            <button className="btn btn-sm btn-success" data-id={row.id}> Barcode </button>
-                                            <button className="btn btn-sm btn-danger" data-id={row.id} onClick={removeProduct} > Delete </button>
-                                        </div>
-                                    </td>
-                                </tr>)}
-                            </tbody>
-                        </table>}
-                        {view === 'grid' && (
-                            <table ref={tableRef} className='table grid-view'>
-                                <thead>
-                                    <tr className='d-none'>
-                                        <th>Col</th>
-                                        <th>Col</th>
-                                        <th>Col</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {chunk(rowData,3).map( (chunk,i) => <tr key={i}>
-                                        { chunk.map( row => (<td key={row.id} colSpan={ chunk.length < 3 ? chunk.length: 0 }> <div className={`card-body d-flex grid-view`} >
-                                            <div className={`col-9 d-block`} >
-                                                <div className={`row`}>
-                                                    <strong className="wrapped-text">{wrapText(row.name, 50)}<span className={row.name.length > 28? 'tooltiptext':`d-none`}>{row.name}</span></strong>
-                                                </div>
-                                                <div className="row mt-2" >
-                                                    <p> Price: {currency+' '+row.price}
-                                                        <button className="btn btn-sm ms-2" style={{border:'1px solid gray'}}>
-                                                            <i className="fa-solid fa-barcode" style={{fontSize:'1rem'}}/>    
-                                                        </button>
-                                                    </p>
-                                                </div> 
-                                            </div>
-                                            <div className="col-3 text-center position-relative">
-                                                <img src={`http://localhost:5000/images/${row.image}`} onMouseEnter={()=>setHovered(row.id)} alt=''/>
-                                                {
-                                                    hovered === row.id && <div className='image-container' style={{backgroundImage:`url(http://localhost:5000/images/${row.image})`, backgroundSize:'cover', backgroundRepeat:'no-repeat'}} />
-                                                }
-                                            </div>
-                                        </div></td>))}
-                                    </tr>)}
-                                </tbody>
-                            </table>
-                        )}
+                        {view==='list' && <table className='table' ref={listtableRef} />}
+                        {view === 'grid' && <table ref={tableRef} className='table grid-view' />}
+                        {rowData.length ===0 && <h3>No products yet..</h3>}
                     </div>
                    
                     <Modal isOpen={modal} toggle={toggleModal} className="modal-md" > 
@@ -266,7 +366,7 @@ const Products = () => {
                                                     <label htmlFor="name">Name</label>
                                                 </div>
                                                 <div className="col-8">
-                                                    <input type="text" id="name" name="name" className="form-control" defaultValue={editingProduct.name} />
+                                                    <input type="text" id="name" name="name" className="form-control" onChange={changeProductField} defaultValue={editingProduct.name} />
                                                 </div>
                                             </div>
                                             <div className="row mt-2">
@@ -291,7 +391,7 @@ const Products = () => {
                                                 </div>
                                                 <div className="col-8">
                                                     <select name="tax" ref={selectRef} className="form-control select2" id="tax" onChange={changeProductField}>
-                                                        {taxes.map( tax => <option value={tax.amount+' '+tax.name}>{tax.amount+' '+tax.name}</option>)}
+                                                        {taxes.map( tax => <option key={tax.id} value={tax.amount+' '+tax.name}>{tax.amount+' '+tax.name}</option>)}
                                                     </select>
                                                 </div>
                                             </div>
@@ -301,7 +401,7 @@ const Products = () => {
                                                 </div>
                                                 <div className="col-8">
                                                     <select name="category_id" className="form-control select2" id="category" onChange={changeProductField}>
-                                                        {cats.map( pussy => <option value={pussy.id} selected={pussy.name===editingProduct.catName}> {pussy.name} </option>)}
+                                                        {cats.map( cat => <option key={cat.id} value={cat.id} selected={cat.name===editingProduct.catName}> {cat.name} </option>)}
                                                     </select>
                                                 </div>
                                             </div>
@@ -312,8 +412,9 @@ const Products = () => {
                                                     <h5> Update Image </h5>
                                                     <label htmlFor="image">
                                                         <img 
-                                                            src={ uploadedSrc ? uploadedSrc :`http://localhost:5000/images/${editingProduct.image}`} 
-                                                            alt="" 
+                                                            src={ uploadedSrc ? uploadedSrc :`http://localhost:5100/images/${editingProduct.image}`} 
+                                                            alt=""
+                                                            onError={handleImgError} 
                                                             style={labelStyle}  
                                                         />
                                                     </label>

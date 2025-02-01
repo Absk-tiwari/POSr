@@ -17,7 +17,7 @@ import { useSelector } from "react-redux";
 import { useNavigate, useRoutes } from "react-router-dom";
 import { useEffect } from "react";
 
-axios.defaults.baseURL='http://localhost:5000';
+axios.defaults.baseURL=process.env.REACT_APP_BACKEND_URI??'http://localhost:5100';
 
 axios.defaults.headers.common = headers();
 

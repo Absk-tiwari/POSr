@@ -120,7 +120,7 @@ var Attachments =
                     }
                 }
                 oImg.onerror = function() {
-                    toast.error('Incorrect file format!');
+                    toast.error('Image not uploaded or is of incorrect format!');
                 }; 
                 
                 oImg.src = onDisk? path + data[i]: data[i];

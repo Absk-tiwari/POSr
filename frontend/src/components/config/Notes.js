@@ -141,10 +141,10 @@ export default function Notes() {
                             </Container>
                         </ModalBody>
                     <ModalFooter>
-                        <button className="btn btn-primary" type="button" onClick={toggleModal}>
+                        <button className="btn btn-light btn-rounded" type="button" onClick={toggleModal}>
                             Close
                         </button>
-                        <button className="btn btn-success" type="submit" >
+                        <button className="btn btn-success btn-rounded" type="submit" >
                             Upload
                         </button>
                     </ModalFooter> 

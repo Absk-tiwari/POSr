@@ -1,4 +1,4 @@
-import { lazy } from "react";
+import { lazy, Suspense } from "react";
 import { Navigate } from "react-router-dom"; 
 // import { ProtectedRoute } from './../middleware/ProtectedRoute.js'
 // import * as constant from "../constansts/permission.js";
@@ -20,7 +20,6 @@ const Notes = lazy(() => import("../components/config/Notes.js"));
 const User = lazy(() => import("../components/config/User.js"));
 const Inventory = lazy(() => import("../components/inventory/Inventory.js"));
 /*****Routes******/
-
 const ThemeRoutes = [
   {
     path: "/",
@@ -31,51 +30,47 @@ const ThemeRoutes = [
       { path: "/register", exact: true, element: <Register /> },
       { path: "/dashboard", 
         exact: true, 
-        element: (
-          // <ProtectedRoute permission={constant.DASHBOARD}>
-            <Dashboard />
-          // </ProtectedRoute> 
-        ) 
+        element: <Dashboard key={11}/>
       },
       {
         path: "/sales",
-        element: <Sales/>,
+        element: <Sales key={0}/>,
       },
       {
-        path: "/pos",
-        element: <POS/>,
+        path: "/pos/:type?",
+        element: <POS key={1}/>,
       },
       {
         path: "/products",
-        element: <Products/>,
+        element: <Products key={2}/>,
       },
       {
         path: "/product/create",
-        element: <CreateProduct/>,
+        element: <CreateProduct  key={3}/>,
       }, 
       {
         path: "/configuration",
-        element: <Configuration/>,
+        element: <Configuration key={4}/>,
       },
       {
         path: "/config/:type",
-        element: <CategoryAndTax/>,
+        element: <CategoryAndTax key={5}/>,
       },
       {
         path: "/inventory",
-        element: <Inventory/>,
+        element: <Inventory key={6}/>,
       },
       {
         path: "/payment/:active",
-        element: <Payment/>,
+        element: <Payment key={7}/>,
       },
       {
         path: "/notes",
-        element: <Notes/>,
+        element: <Notes key={8}/>,
       },
       {
         path: "/users",
-        element: <User/>,
+        element: <User key={9}/>,
       },
 
     ],

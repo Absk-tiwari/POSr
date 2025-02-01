@@ -70,4 +70,15 @@ router.get('/remove/:id', fetchuser, async(req, res) =>{
     }
 }); 
 
+router.get('/toggle/:id/:status', async (req,res) => {
+    try { 
+        const category = await Category.query().patchAndFetchById(req.params.id, {
+            status: req.params.status
+        }); 
+        return res.json({status:true, category, message: "Status updated!" });
+    } catch (error) {
+        return res.json({ status:false, category:{}, message: error.message, message: "Something went wrong!" })   
+    }
+})
+
 module.exports=router 

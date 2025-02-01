@@ -7,16 +7,16 @@ import currencyImg from '../../asset/images/currency.webp';
 import addUser from '../../asset/images/add-user.png';
 import notes from '../../asset/images/notes.webp';
 import alert from '../../asset/images/alert.png';
-import { useSelector } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
 import { Modal, ModalHeader, ModalFooter, ModalBody, FormGroup, Form } from 'reactstrap';
 
 function Configuration() {
-    const { currency } = useSelector(state => state.auth);
+    const { currency, stockAlert } = useSelector(state => state.auth);
     const [ currencyCatogory, setCurrencyCategory ] = useState(false);
     const [ stockModal, setStockModal ] = useState(false);
-    const [ minStock, setAlert ] = useState(0)
-
+    const [ minStock, setAlert ] = useState(stockAlert)
+    const dispatch = useDispatch();
     const updateCurrency = () => {
         axios.get("https://api.apilayer.com/exchangerates_data/latest?symbols=EUR&base=INR", {
             redirect: 'follow',
@@ -32,7 +32,8 @@ function Configuration() {
         e.preventDefault();
         axios.post('config/update-stock-alert', {stock: minStock}).then(({data}) => {
             if(data.status) {
-                toast.success(data.message);
+                toast.success(data.message);                 
+                dispatch({ type: "STOCK_ALERT", payload: minStock })
             } else {
                 toast.error(data.message);
             }
@@ -71,18 +72,7 @@ function Configuration() {
                         </Link>
                         <h5 className="pt-3"> Tax </h5>
                     </div>
-                    <div className="text-center">
-                        <div className="card redirect tablink" onClick={()=> setCurrencyCategory(!currencyCatogory)} title={"Currency"}>
-                            <div className="card-body">
-                                <div className="d-flex" title="Currency">
-                                    <div style={{width:'70px', textAlign:'center'}}>
-                                        <img src={currencyImg} height="60" alt={''} />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <h5 className="pt-3"> Currency </h5>
-                    </div>
+                   
                     <div className="text-center">
                         <div className="card redirect tablink" onClick={()=> setStockModal(!stockModal)} title={"Set stock alert"}>
                             <div className="card-body">
@@ -138,7 +128,7 @@ function Configuration() {
                 </div>
             </ModalBody>
             <ModalFooter>
-                <button className='btn btn-light' onClick={()=> setCurrencyCategory(!currencyCatogory)}>Close</button>
+                <button className='btn btn-light btn-rounded' onClick={()=> setCurrencyCategory(!currencyCatogory)}>Close</button>
             </ModalFooter>
         </Modal>
 
@@ -154,8 +144,8 @@ function Configuration() {
                     </FormGroup>
                 </ModalBody>
                 <ModalFooter>
-                    <button className='btn btn-light' type='button' onClick={()=> setStockModal(!stockModal)}>Close</button>
-                    <button className='btn btn-success' > Update </button>
+                    <button className='btn btn-light btn-rounded' type='button' onClick={()=> setStockModal(!stockModal)}>Close</button>
+                    <button className='btn btn-success btn-rounded' > Update </button>
                 </ModalFooter>
             </Form>
         </Modal>

@@ -1,25 +1,31 @@
-import React, { useEffect, useState } from 'react'; 
+import React, { useEffect, useRef, useState } from 'react'; 
 import axios from 'axios';
 import { useDispatch, useSelector } from 'react-redux';
 import { useGetProductCategoriesQuery, useGetPosProductsQuery } from '../../features/centerSlice';
-import { isColorDark, hexToRgb, chunk, wrapText, Warning } from '../../helpers/utils';
-import labelImg from '../../asset/images/product.png';
+import { isColorDark, hexToRgb, chunk, wrapText, Warning, dataURLtoFile } from '../../helpers/utils';
+import labelImg from '../../asset/images/default.png';
 import addNew from '../../asset/images/image.png';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useSearch } from '../../contexts/SearchContext';
 import { Modal, ModalHeader, ModalBody, ModalFooter, Row, Label, Input, FormGroup, Col, Form } from 'reactstrap';
 import toast from 'react-hot-toast';
 
 function POS() {
- 
+    const sectionRef = useRef(null);
+    const cRef = useRef(null);
+    const cntRef = useRef(null);
     const dispatch = useDispatch();
     const navigator = useNavigate();
-    const { currency, split, cartStocks, cartProducts, openingCash } = useSelector( state => state.auth );
+    const location = useLocation();
+    const { currency, split, cartStocks, cartProducts, openingCash, appKey } = useSelector( state => state.auth );
+    const [ key, setKey] = useState(appKey)
+    const [appModal , setAppModal] = useState(false)
     const [ openingAmountSet, setOpeningAmount ] = useState(openingCash); 
     const [ enteredCash , setEnteredCash ] = useState('');
     const { data, isSuccess } = useGetProductCategoriesQuery();
     const [ products, setProducts ] = useState([])
     const [ catColors, putCats] = useState({})
+    const [ noProduct, setNoProduct ] = useState(false)
     const [ prCategories, setCategories ] = useState([])
     const [ initialProducts, setInitialProducts] = useState([]);
     const [ KartProducts, setCartProducts ] = useState(cartProducts);
@@ -27,52 +33,201 @@ function POS() {
     const [ Other, toggleOther ] = useState(false);
     const [ otherOpen, setModal ] = useState(false);
     const [ availableStocks, setAvailableStocks ] = useState(cartStocks);
+    const [ barcode, setBarcode ] = useState('');
+    const [ opened, toggleVegetableModal ] = useState(false);
+    const [ number, setNumber ] = useState('');
+    const [ editing, setEditing ] = useState(false);
+    const [ loadingPhone, setLoading ]= useState(false);
+    const [vegetable, setVegetable] = useState({});
+    const [custom, setCustom] = useState({image:null, price:0, name:'', barcode:'', stock:0});
+    
+    const btnStyle = {minHeight:'60px', fontSize:'1.4rem'}
+
+    useEffect(() => {
+
+        let inputBuffer = "";
+        const handleKeyDown = (event) => {
+
+            const { key } = event;
+            // Check for "Enter" key to signal the end of a barcode
+            if (key === "Enter") {
+                setBarcode(inputBuffer); // Update the barcode state 
+                inputBuffer = ""; // Reset buffer for the next scan
+            } else {
+                // Append the key to the buffer (only if it's a character key)
+                if (key.length === 1) {
+                    inputBuffer += key;
+                }
+            }
+        };
+        window.addEventListener("keydown", handleKeyDown);
+
+        return () => window.removeEventListener("keydown", handleKeyDown);
+
+    }, [barcode]);
+
+    useEffect(()=> {
+        if(barcode) {
+            axios.get(`products/barcode/${barcode}`).then(({data})=> {
+                addToCart(data.product.id)
+                setBarcode('')
+            }).catch(()=>{}).finally(()=> null);
+        }
+        return () => null
+    },[barcode])
     
     const allProducts = useGetPosProductsQuery();
-    const { searchQuery, sessions, activeSession } = useSearch();
+    const { searchQuery, sessions, activeSession, displayImage } = useSearch();
 
     useEffect(() => {
         if(allProducts.data?.products){
             setProducts(chunk(allProducts.data.products.filter(ite => (ite.name).toLowerCase().includes(searchQuery.toLowerCase())),4))
         }
+        return () => setProducts([]);
     },[searchQuery])
-    
-    const addToCart = (prID, add=true) => {
-        if(add) {
-            let product = initialProducts.find(ite => ite.id === prID); 
-            setCurrent(prID)
-            const copyKartProducts = JSON.parse(JSON.stringify(KartProducts));
-            let thisProduct = copyKartProducts[activeSession]?.find(ite => ite.id === prID);
 
-            if( thisProduct && !split ) {
-                let updatedStock = thisProduct.stock + 1;
-                let availableStock = product.quantity - updatedStock;
-                if( availableStock === -1 ) {
-                    return document.querySelector('.also[data-id="'+product.id+'"]').classList.add('stock-out');
-                }
-                setAvailableStocks({...availableStocks, [product.id]: availableStock })
-                // dispatch({ type: "CART_STOCKS", payload:{...availableStocks, [product.id]: availableStock } });
-                // console.log(availableStock);
-                thisProduct.stock = updatedStock;
-                setCartProducts(copyKartProducts);
-                dispatch({ type: "CHOOSEN_PRODUCT", payload:copyKartProducts });
-            
-            } else {
-                product = {...product, stock: 1 }
-                let consumed = Object.values(KartProducts).flat()?.filter( item => item.id === product.id).reduce( (prev, item) => prev + item.stock, 0 )?? 0;
-                let availableStock = product.quantity - ( consumed + 1 );
-                if( availableStock === -1 ) {
-                    return document.querySelector('.also[data-id="'+product.id+'"]').classList.add('stock-out');
-                }
-                setAvailableStocks({...availableStocks, [product.id]: availableStock });
-                setCartProducts({...KartProducts,[activeSession]: [...KartProducts[activeSession]??[], product] });
-                // dispatch({ type: 'CART_STOCKS', payload:{...availableStocks, [product.id]: availableStock } });
-                dispatch({ type: 'CHOOSEN_PRODUCT', payload: {...KartProducts,[activeSession]: [...KartProducts[activeSession]??[], product] } });
+    const handleVegetable = () => toggleVegetableModal(!opened)
 
-            }
+    const scrollTop = e => {
+        console.log(cntRef.current.scrollHeight)
+        cntRef.current.scrollTo({
+            top: 0, // Scroll to the top
+            behavior: "smooth", // Smooth scrolling effect
+        });
+
+        let el = document.querySelector(`.t-scroller`);
+        if(el) {
+            el.scrollIntoView({
+                behavior:'smooth',
+                top: 0
+            })
         }
+
     }
 
+    const fetchPhoneProducts = async (e) => {
+        e.preventDefault()
+        try {
+            setLoading(true);
+            console.log(key);
+            if(!key) {
+                return setAppModal(!appModal)
+            }
+            dispatch({ type: "SET_APP_KEY", payload: key })
+            dispatch({ type:"LOADING" });
+
+            const {data} = await axios.get(`https://pos.dftech.in/sync-products/${key}`);
+            if(data.status) {
+                toast.success(data.message);
+                let fd = new FormData();
+                const midFile= dataURLtoFile(`data:application/json;base64,`+data.file, 'client.json');
+                fd.append('file', midFile);
+
+                const {data:resp} = await axios.post('products/sync', fd, {
+                    headers: {
+                        'Accept': 'application/json',
+                        "Content-Type" : "multipart/form-data",
+                        'pos-token' : localStorage.getItem('pos-token')
+                    }
+                });
+ 
+                if(resp.status) {
+                    toast.success("Importing completed");
+                    setTimeout(()=> window.location.reload(), 2400);
+                }
+            } else {
+                toast.error(data.message);
+            }
+            
+        } catch (error) {
+            console.log(error.message);
+            toast.error("Couln't fetch products right now!")
+        }
+        dispatch({ type:"STOP_LOADING" });
+        setLoading(false)
+    }
+
+    const addVeg = e => {
+        e.preventDefault();
+        const copyKartProducts = JSON.parse(JSON.stringify(KartProducts));
+        let thisProduct = copyKartProducts[activeSession]?.find(ite => ite.id === vegetable.id);
+        // check if the product is already in cart
+        if( thisProduct && !split ) {
+            // let updatedStock = thisProduct.stock + 1;
+            let availableStock = vegetable.quantity - vegetable.stock;
+            if( availableStock === -1 ) {
+                return document.querySelector('.also[data-id="'+vegetable.id+'"]').classList.add('stock-out');
+            }
+            // update the remaining stock each product
+            setAvailableStocks({...availableStocks, [vegetable.id]: availableStock });
+            thisProduct.stock = vegetable.stock;
+            setCartProducts(copyKartProducts);
+            dispatch({ type: "CHOOSEN_PRODUCT", payload:copyKartProducts });
+        
+        } else {
+ 
+            let consumed = Object.values(KartProducts).flat()?.filter( item => item.id === vegetable.id).reduce( (prev, item) => prev + item.stock, 0 )?? 0;
+            let availableStock = vegetable.quantity - ( consumed + 1 );
+            if( availableStock === -1 ) {
+                return document.querySelector('.also[data-id="'+vegetable.id+'"]').classList.add('stock-out');
+            }
+            setAvailableStocks({...availableStocks, [vegetable.id]: availableStock });
+            setCartProducts({...KartProducts,[activeSession]: [...KartProducts[activeSession]??[], vegetable] });
+            dispatch({ type: 'CHOOSEN_PRODUCT', payload: {...KartProducts,[activeSession]: [...KartProducts[activeSession]??[], vegetable] } });
+
+        }
+        toggleVegetableModal(!opened)
+        scrollToSection()
+    }
+    
+    const addToCart = prID => 
+    {
+        let product = initialProducts.find(ite => ite.id === prID); 
+        if(product.catName && product.catName.toLowerCase().indexOf('vegetable')!==-1 ) {
+            product = {...product, unit:'kg', stock:1}
+            setVegetable(product)
+            return handleVegetable() 
+        }
+        const copyKartProducts = JSON.parse(JSON.stringify(KartProducts));
+        let thisProduct = copyKartProducts[activeSession]?.find(ite => ite.id === prID);
+        // check if the product is already in cart
+        if( thisProduct && !split ) {
+            let updatedStock = thisProduct.stock + 1;
+            let availableStock = product.quantity - updatedStock;
+            if( availableStock === -1 ) {
+                return document.querySelector('.also[data-id="'+product.id+'"]').classList.add('stock-out');
+            }
+            if(!split) {  // update the current project highlight
+                setCurrent(KartProducts[activeSession].findIndex(item => item.id === product.id))
+            } else { // update the current project highlight if splittin products is off
+                setCurrent(KartProducts[activeSession]?.length??0) 
+            }
+            // update the remaining stock each product
+            setAvailableStocks({...availableStocks, [product.id]: availableStock });
+            thisProduct.stock = updatedStock;
+            setCartProducts(copyKartProducts);
+            dispatch({ type: "CHOOSEN_PRODUCT", payload:copyKartProducts });
+        
+        } else {
+            setCurrent(KartProducts[activeSession]?.length??0 ) 
+            product = {...product, stock: 1 }
+            let consumed = Object.values(KartProducts).flat()?.filter( item => item.id === product.id).reduce( (prev, item) => prev + item.stock, 0 )?? 0;
+            let availableStock = product.quantity - ( consumed + 1 );
+            if( availableStock === -1 ) {
+                return document.querySelector('.also[data-id="'+product.id+'"]').classList.add('stock-out');
+            }
+            setAvailableStocks({...availableStocks, [product.id]: availableStock });
+            setCartProducts({...KartProducts,[activeSession]: [...KartProducts[activeSession]??[], product] });
+            dispatch({ type: 'CHOOSEN_PRODUCT', payload: {...KartProducts,[activeSession]: [...KartProducts[activeSession]??[], product] } });
+            // update the current project highlight
+        }
+        
+    }
+
+    const resetCart = () => {
+        setCartProducts( {...KartProducts,[activeSession]: [] });
+        dispatch({ type: "CHOOSEN_PRODUCT", payload: {...KartProducts, [activeSession]: []} });
+    }
     // Reverse the stock decrement here
     const removeFromCart = index => {
         setCartProducts( {...KartProducts,[activeSession]: KartProducts[activeSession].filter((item, i)=> i!== index) });
@@ -102,13 +257,24 @@ function POS() {
 
     }
 
+    const handleImgError = e => {
+        e.target.src = labelImg
+    }
     // category se filter karega
     const filterProducts = catID => {
         setProducts(chunk(allProducts.data.products.filter(ite => ite.category_id===catID),4))
         toggleOther(!catID)
     }
 
-    const createCustomer = () => {}
+    const scrollToSection = () => {
+        let el = document.querySelector(`.chosen-product.selected`);
+        if(el) {
+            el.scrollIntoView({
+                behavior:'smooth',
+                block: 'center'
+            })
+        }
+    };
     
     useEffect(() => {
         if( isSuccess ) {
@@ -118,19 +284,34 @@ function POS() {
             putCats(cats);
         }
         if(allProducts.isSuccess) {
+            if(allProducts.data.products.length === 0 ){
+                setNoProduct(true);
+            } else {
+                setNoProduct(false)
+            }
             setProducts(chunk(allProducts.data.products, 4))
             setInitialProducts(allProducts.data.products);
         }
-        return () => null
-    },[ isSuccess, data, allProducts.data, allProducts.isSuccess ]);
+        return () => {
+            setInitialProducts([])
+            setProducts([])
+        }
+    },[ isSuccess, data, allProducts.data, allProducts.isSuccess, navigator]);
 
     useEffect(()=> {
         setCartProducts(cartProducts);
-        return () => null
+        scrollToSection()
+        return () => {
+            setCartProducts([]);
+        }
     },[ cartProducts ]);
 
     useEffect(()=> {
-    },[cartStocks])
+        if(cartStocks){
+            setAvailableStocks(cartStocks)
+        }
+        return () => setAvailableStocks({})
+    },[location, cartStocks])
  
     const base = {
         height:'69vh',
@@ -142,12 +323,67 @@ function POS() {
         marginTop:'5%'
     }
 
+    const addCustomProduct = async e => 
+    {
+        e.preventDefault();
+        const fd = new FormData();
+        fd.append('name', custom.name);
+        fd.append('price', custom.price);
+        fd.append('barcode', custom.barcode);
+        fd.append('quantity', custom.stock);
+        fd.append('image', custom.image);
+        if(!custom.name || !custom.price || !custom.barcode) {
+            return Warning('Fill the required fields');
+        }
+
+        dispatch({ type:"LOADING" })
+        const {data} = await axios.post(`/products/create-custom`, fd, {
+            headers:{ 
+                "Accept"       :"application/json",
+                "Content-Type" : "multipart/form-data",
+                "pos-token"    : localStorage.getItem('pos-token')
+            }
+        });
+        dispatch({ type:"STOP_LOADING" })
+        if( data.status ) {
+            toast.success(data.message);
+        } else { 
+            toast.error(data.message);
+        }       
+    }
+
+    const handleFile = e => {
+        const file = e.target.files[0];
+        setCustom({...custom, image: file})
+    }
+    
+    const {type:screenType} = useParams();
+    
+    const changeInput = input => {
+        if(editing) {
+            let newAmount
+            if(input==='clear') {
+                newAmount = '0'
+                setNumber(''); 
+            } else {
+                newAmount = number + input;  
+                setNumber(number + input); 
+            } 
+            setCartProducts( {...KartProducts,[activeSession]: KartProducts[activeSession].map((item, i)=> {
+                if(i=== currentProduct ) {
+                    item = {...item, price:newAmount}
+                }
+                return item
+            }) });
+        }
+    }
+
     const fs2 = {fontSize: '2rem'}
 
     return (
         <>
-            <div className="col-md-12 position-relative">
-                { Object.keys(openingAmountSet).length === 0 || !openingAmountSet.status === true ? (
+            <div className={`col-md-12 position-relative ${screenType==='customer' && "d-grid justify-content-center"}`} >
+                { (Object.keys(openingAmountSet).length === 0 || !openingAmountSet.status === true) && screenType!=='customer'? (
                     <div className='overlay' style={{width:'100vw', height:'100vh',position:'absolute'}}>
                         <Modal isOpen={true}>
                             <Form onSubmit={openTheFuckingDay}>
@@ -162,7 +398,7 @@ function POS() {
                                                     <b>Enter Opening Cash In Drawer</b>
                                                 </Label>
                                                 <Input 
-                                                    type='text'
+                                                    type={'text'}
                                                     placeholder={currency}
                                                     onChange={e => setEnteredCash(e.target.value)}
                                                     style={{border:'1px solid gray'}}
@@ -171,7 +407,7 @@ function POS() {
                                         </Col>
                                     </Row>
                                 </ModalBody>
-                                <ModalFooter className='justify-content-center'>
+                                <ModalFooter className={'justify-content-center'}>
                                     <Col md={5} className='btn btn-light' onClick={()=> navigator('/')} >
                                         Back
                                     </Col>
@@ -183,144 +419,116 @@ function POS() {
                         </Modal>
                     </div>
                 ): null}
-                <div className="col-md-4 position-fixed pt-3" style={{filter:Object.keys(openingAmountSet).length === 0 || !openingAmountSet.status === true ? 'blur(5px)':''}}>
-                    { sessions.map( session => (<div key={session} className={`container ms-2 put-here ${activeSession===session?'':'d-none'} ${KartProducts[activeSession] && KartProducts[activeSession].length ?'action-visible':''}`} style={{borderRadius:'20px',backgroundColor:'#dadada'}}>
+                {
+                    screenType==='customer' && <div >
+                        <h2 className='text-center' style={{ fontSize:'3rem', fontWeight:'900' }}>
+                        {currency} {parseFloat(KartProducts[activeSession]?.reduce((acc, cur)=> acc + (cur.stock * parseFloat(cur.price)),0)).toFixed(2)}
+                        </h2>
+                    </div>
+                }
+                <div className={`col-md-4 pt-3 ${screenType==='customer'?'':'position-fixed'}`} style={{filter:Object.keys(openingAmountSet).length === 0 || !openingAmountSet.status === true ? 'blur(5px)':'',width:screenType==='customer'?'100%':'38.8%'}}>
+                    { sessions.map( session => (<div key={session} ref={sectionRef} className={`container ms-2 put-here ${activeSession===session?'':'d-none'} ${KartProducts[activeSession] && KartProducts[activeSession].length && screenType!=='customer' ?'action-visible':''}`} 
+                        style={{
+                            borderRadius:'20px',
+                            backgroundColor:'#dadada'
+                    }}>
                         <div className={`card ${KartProducts[activeSession] && KartProducts[activeSession].length? 'd-none':''}`} style={base}>
                             <i className="fa-solid fa-cart-shopping" style={{fontSize:'60px'}} />
                             <b className="mt-3"> Start adding products </b>
                         </div>
-                        { KartProducts[activeSession] && KartProducts[activeSession].map( (item,index) => (<div key={index} className={`row chosen-product mt-2 ${currentProduct===item.id && 'selected'}`} data-id={item.id} onClick={()=> setCurrent(item.id)}>
+                        { KartProducts[activeSession] && KartProducts[activeSession].map( (item,index) => (<div key={index} className={`row chosen-product mt-2 ${currentProduct===index && 'selected'}`} data-id={item.id} onClick={()=> setCurrent(index)}>
                             <div className="d-flex w-100">
                                 <b style={{maxWidth:'24rem'}}> {item.name} </b>
                                 <strong className="price" data-price={item.price}>{currency +' '+ (item.stock * parseFloat(item.price)).toFixed(2)}</strong>
                             </div>
                             <div className="d-flex">
-                                <span className="quantity"> {(item.stock).toFixed(2)} </span>
-                                <p className="ms-3 mt-1">{`${currency + ' ' + parseFloat(item.price).toFixed(2)} / Units`}</p>
+                                <span className="quantity"> {parseFloat(item.stock).toFixed(2)} </span>
+                                {item.id!=='quick' && <p className="ms-3 mt-1">{`${currency + ' ' + parseFloat(item.price).toFixed(2)} / ${item.unit? item.unit : 'Units'}`}</p>}
                             </div>
                             <button className="btn" onClick={()=>removeFromCart(index)}><i className="mdi mdi-close"/></button>
                         </div>))}
                     </div>))}
-                    <div className={`container ms-2 mt-3 actionBar ${KartProducts[activeSession] && KartProducts[activeSession].length ? '':'d-none'}`} style={{height: '54vh'}}>
+                    <div className={`container ms-2 mt-3 actionBar ${KartProducts[activeSession] && KartProducts[activeSession].length && screenType!=='customer' ? '':'d-none'}`} style={{height: '54vh'}}>
                         <div className="row">
                             <div className="col-sm-12 d-flex">
                                 <div className="col-sm-6">
-                                    <Link className="btn btn-light text-white" to={`/payment/${activeSession}`} style={{backgroundColor:'#04537d',width:'93%'}}> Payment </Link>
+                                    <Link className="btn btn-light btn-rounded text-white" to={`/payment/${activeSession}`} style={{backgroundColor:'#04537d',width:'93%'}}> Payment </Link>
                                 </div>
-                                <div className="col-sm-6 d-flex justify-content-end align-items-center ">
-                                    <p style={{lineHeight:2.1}}><b>Total: &nbsp; 
-                                    <span className="total-amount fs-5">{currency} {parseFloat(KartProducts[activeSession]?.reduce((acc, cur)=> acc + (cur.stock * parseFloat(cur.price)),0)).toFixed(2)} </span> </b></p>
+                                <div className="col-sm-6 d-flex justify-content-end align-items-center position-relative">
+                                    <div className='position-absolute'>
+                                        <p style={{lineHeight:2.1}}><b> Total: &nbsp; 
+                                        <span className="total-amount" style={{left:0,fontSize:'2.3rem'}}>{currency} {parseFloat(KartProducts[activeSession]?.reduce((acc, cur)=> acc + (cur.stock * parseFloat(cur.price)),0)).toFixed(2)} </span> </b></p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                         <div className="row mt-1">
-                            <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 1 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 2 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 3 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light text-dark" type="button" data-toggle="modal" data-target="#customer"> Customer </button>
+                            {[1,2,3].map( it => <div className="col-sm-3" key={it} onClick={()=> changeInput(it)}>
+                                <button className="btn btn-light num w-100 text-dark" disabled={!editing} style={btnStyle}> <b> {it} </b> </button>
+                            </div>)}
+                            <div className="col-sm-3" onClick={resetCart}>
+                                <button className="btn btn-light text-dark" type="button" style={btnStyle}> <b>Delete</b> </button>
                             </div>
                         </div>
                         <div className="row mt-1">
-                            <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 4 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 5 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 6 </b> </button>
-                            </div>
+                            { [4,5,6].map( it => <div className="col-sm-3" key={it} onClick={()=> changeInput(it)}>
+                                <button className="btn btn-light num w-100 text-dark" disabled={!editing} style={btnStyle}> <b> {it} </b> </button>
+                            </div>)}
+                            <div className="col-sm-3"/>
+                        </div>
+                        <div className="row mt-1">
+                            {[7,8,9].map( ite => <div className="col-sm-3" key={ite} onClick={()=> changeInput(ite)}>
+                                <button className="btn btn-light num w-100 text-dark" disabled={!editing} style={btnStyle}> <b> {ite} </b> </button>
+                            </div>)}
                             <div className="col-sm-3">
                             </div>
                         </div>
                         <div className="row mt-1">
                             <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 7 </b> </button>
+                                <button className="btn btn-light num w-100 text-dark" disabled={!editing} onClick={()=> changeInput('.')} style={btnStyle}> <b> . </b> </button>
                             </div>
                             <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 8 </b> </button>
+                                <button className="btn btn-light num w-100 text-dark" disabled={!editing} onClick={()=> changeInput(0)} style={btnStyle}> <b> 0 </b> </button>
                             </div>
                             <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 9 </b> </button>
+                                <button className="btn btn-light num w-100 text-dark" disabled={!editing} onClick={()=>changeInput('clear')} style={btnStyle}> <b>Clear</b> </button>
                             </div>
-                            <div className="col-sm-3">
-                            </div>
-                        </div>
-                        <div className="row mt-1">
-                            <div className="col-sm-3">
-                                <button className="btn btn-light w-100 text-dark" > <b> . </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light num w-100 text-dark"> <b> 0 </b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light w-100 text-dark" > <b className="fa fa-minus"></b> </button>
-                            </div>
-                            <div className="col-sm-3">
-                                <button className="btn btn-light w-100 text-dark" > <b> Price </b> </button>
+                            <div className="col-sm-3" onClick={()=> setEditing(!editing)}>
+                                <button className="btn btn-light num w-100 text-dark" > <b> {!editing?'Edit Price':'Done'} </b> </button>
                             </div>
                         </div>
                     </div>
 
                 </div>
-                <div className="col-md-7 position-absolute library" style={{
+                {screenType!=='customer' ? <div className="col-md-7 position-absolute library" style={{
                     height:'70vh',
                     right:'5px',
                     filter: Object.keys(openingAmountSet).length === 0 || !openingAmountSet.status === true ? 'blur(5px)':''
                     }}
+                    
                 >
-                    <div className="position-relative">
-                        <div className="category row w-100" style={{flexWrap:'nowrap'}}>
+                    <div className="position-fixed" style={{backgroundColor:'#a0bfcf',minHeight:70, width:'58%',zIndex:100}}>
+                        <div className="category row ms-5" style={{flexWrap:'nowrap'}} ref={cRef}>
                             { prCategories.map((Cat,i) => (<div key={i} className={`category-item ${i===0 ?'active':''}`} style={{color:isColorDark(hexToRgb(Cat.color))? 'white':'black', background:Cat.color}} onClick={()=>filterProducts(Cat.id)}>
                                 {(Cat.name).includes('/') ? (Cat.name).split('/')[1]: Cat.name }
                             </div>))}
                             <div className='category-item' onClick={()=> filterProducts(null)} style={{background:"azure", width:200, marginRight:80}}>
                                 Other 
                             </div>
+                            <div className='position-fixed t-scroller' style={{bottom:40,right:40}} onClick={scrollTop}>
+                                <button className='btn btn-rounded bg-white' style={{border:"2px dashed"}}>
+                                    <i className='fa fa-arrow-up'/>
+                                </button>
+                            </div>
                         </div>
-                        <button className="btn prev d-none position-absolute" style={{top:'3px',zIndex:2,left:0}}>
-                            <i style={fs2} className="fa-solid fa-circle-chevron-left text-white"/>
+                        <button className={`btn prev position-relative`} style={{top:5,zIndex:2,left:-30}} onClick={()=> cRef.current.scrollBy({left:-200, behavior:'smooth'})}>
+                            <i style={fs2} className="fa-solid fa-circle-chevron-left text-dark"/>
                         </button>
-                        <button className="btn next position-absolute" style={{right:'10px',paddingRight:'10px',top:'3px',zIndex:2}}>
-                            <i style={fs2} className="fa-solid fa-circle-chevron-right text-white"/>
+                        <button className="btn next position-absolute" style={{right:-10,top:5,zIndex:2 }} onClick={()=>cRef.current.scrollBy({left:200, behavior:'smooth'})}>
+                            <i style={fs2} className="fa-solid fa-circle-chevron-right text-dark" />
                         </button>
                     </div>
-                    <div className="contents" >
-                        { products.map( (row, k) => (<div className={'row mt-3'} key={k}>
-                                {row.map((product,i ) => (
-                                    <div key={i} className={`col-md-3 also ${(product.quantity - product.stock)===0 || product.quantity - cartStocks[product.id] === 0 ? 'stock-out':''}`} onClick={()=>addToCart(product.id)} data-id={product.id}>
-                                        <div className='cell'>
-                                            <div className='w-100'>
-                                                <img className='title-img' src={process.env.REACT_APP_BACKEND_URI+'images/'+product.image} onError={()=> labelImg} alt={product.name}/>
-                                            </div>
-                                            <div className='w-100' style={{color:isColorDark(hexToRgb(catColors[product.category_id]))? 'white':'black', background:catColors[product.category_id]}}>
-                                                <strong className='wrapped-text'>
-                                                    {wrapText(product.name, 40)}
-                                                    <span className='tooltiptext'>{product.name}</span>
-                                                </strong>
-                                            </div>
-                                        </div>
-                                        <div className='extras'>
-                                            <div className='tax'>
-                                                <small>Tax</small>
-                                                <div style={{fontSize:'800'}}>{product.tax}</div>
-                                            </div>
-                                            <div className='stock'>
-                                                <small>Items : </small>
-                                                <div style={{fontSize:'800'}}>{ product.quantity - (cartStocks[product.id]?? 0) }</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>))
-                        }
+                    <div className="contents" ref={cntRef}>
                         {
                             Other && (<div className='row mt-3' >
                                 <div className='col-md-3 also' onClick={()=>toggleModal(!otherOpen)}>
@@ -338,116 +546,60 @@ function POS() {
                                 </div>
                             </div>)
                         }
-                    </div>
-                    {products.length === 0 && !Other && (<div className="d-flex lib-loader justify-self-center">
-                        <i className="fa fa-spin fa-spinner fs-1" />
-                    </div>)}
-                </div>
-            </div>
-
-            <div className="modal" id="customer" tabIndex="-1" data-keyboard="false" data-backdrop="static" role="dialog" aria-labelledby="customerLabel" aria-hidden="true">
-                <div className="modal-dialog modal-md" >
-                    <div className="modal-content">
-                        <div className="modal-header">
-                            <button className="modal-title btn btn-light text-dark" onClick={createCustomer} type="button"> Create </button>
-                            <button type="button" className="close" data-dismiss="modal" aria-label="Close">
-                                <span aria-hidden="true" className="fa fa-close"/>
-                            </button>
-                        </div>
-                        <div className="modal-body">
-                            <form id="customer-create-update" className="create-update-customer-form d-none" >
-                                <div className="col-12 grid-margin">
-                                    <div className="card">
-                                        <div className="card-body exception">
-                                            <div className="row">
-                                                <div className="row w-100">
-                                                    <div className="col-12">
-                                                        <div className="form-group">
-                                                            <input type="text" name="name" className="input w-100" style={{fontSize:'larger'}} placeholder="e.g. Philips" />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="row w-100">
-                                                    <div className="col-12">
-                                                        <div className="row">
-                                                            <div className="form-group">
-                                                                <input type="text" className="input" name="phone" placeholder="Phone" />
-                                                            </div>
-                                                            <div className="form-group">
-                                                                <input type="text" className="input" name="city" placeholder="City" />
-                                                            </div>
-                                                            <div className="form-group">
-                                                                <input type="text" className="input" name="state" placeholder="State" />
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="col-6">
-
-                                                        <div className="row">
-                                                            <div className="form-group">
-                                                                <input type="text" name="street1" className="input" placeholder="Street..." />
-                                                            </div>
-                                                            <div className="form-group">
-                                                                <input type="text" name="email" className="input" placeholder="@" />
-                                                            </div>
-                                                            <div className="form-group">
-                                                                <input type="text" name="title" className="input" placeholder="e.g. Mister" />
-                                                            </div>
-                                                        </div>
-
-                                                    </div>
-
-                                                </div>
-                                                <div className="w-100 tabs">
-
-                                                    <div className="d-flex tabheader">
-                                                        <button type="button" className="tablink w-100" > Internal Notes </button>
-                                                    </div>
-                                                    <div id="About" className="tabcontent">
-                                                        <textarea name="notes" rows="3" cols="50" className="input" placeholder="Internal notes..." />
-                                                    </div>
-
-                                                </div>
+                        { products.map( (row, k) => (<div className={'row mt-3'} key={k}>
+                                {row.map((product,i ) => (
+                                    <div key={i} className={`col-md-3 also ${(product.quantity - product.stock)===0 || product.quantity - cartStocks[product.id] === 0 || parseInt(product.quantity)=== 0 ? 'stock-out':''}`} onClick={()=>addToCart(product.id)} data-id={product.id}>
+                                        <div className='cell' style={{minHeight:135}}>
+                                            {
+                                            displayImage &&
+                                            <div className='w-100'>
+                                                <img className='title-img' src={process.env.REACT_APP_BACKEND_URI+'images/'+product.image} onError={handleImgError} alt={product.name}/>
+                                            </div>
+                                            }
+                                            <div className='w-100' style={{minHeight: !displayImage && 'inherit' ,color:isColorDark(hexToRgb(catColors[product.category_id]))? 'white':'black', background:catColors[product.category_id]}}>
+                                                <strong className='wrapped-text' style={{alignContent:'center'}}>
+                                                    {wrapText(product.name, 100)}
+                                                    {
+                                                        product.name.length > 100 &&
+                                                    <span className='tooltiptext'>{product.name}</span>
+                                                    }
+                                                </strong>
+                                            </div>
+                                        </div>
+                                        <div className='extras'>
+                                            <div className='tax'>
+                                                <small>Tax</small>
+                                                <div style={{fontSize:'800'}}>{product.tax}</div>
+                                            </div>
+                                            <div className='stock'>
+                                                <small>Items : </small>
+                                                <div style={{fontSize:'800'}}>{ product.quantity - (cartStocks[product.id]?? 0) }</div>
                                             </div>
                                         </div>
                                     </div>
-                                </div>
-                            </form>
-                            <div className="table-responsive" id="customers"></div>
-                        </div>
-                        <div className="modal-footer">
-                            <button type="button" className="btn btn-light" data-dismiss="modal"> Close </button>
-                            <button type="submit" className="d-none btn btn-primary">Save changes</button>
-                        </div>
+                                ))}
+                            </div>))
+                        }
+                        
                     </div>
-                </div>
-            </div>
-
-
-            <div className="modal fade" id="modal" tabIndex={-1} data-keyboard={false} role="dialog" aria-labelledby="customerLabel" aria-hidden={true} >
-                <div className="modal-dialog modal-sm" role="document">
-                    <form action="">
-                        <div className="modal-content">
-                            <div className="modal-header">
-                                Currency
-                            </div>
-                            <div className="modal-body">
-                                <div className="form-group">
-                                    <b className="mt-3"> 
-                                    <h5> Scan the Barcode </h5>
-                                    <p id="output"></p></b>
-                                </div>
-                                <div className="product">
-                                    <span className="fa fa-spin fa-spinner" />
-                                </div>
-                            </div>
-
-                        </div>
-                    </form>
-                </div>
+                    {products.length === 0 && !Other && (<div className="lib-loader justify-content-center align-items-center" 
+                    style={{height:'-webkit-fill-available'}} >
+                        {
+                            noProduct && isSuccess? <>
+                            <h1> No products... </h1>
+                            <button className='btn btn-rounded btn-warning fs-4' onClick={fetchPhoneProducts}> 
+                                { loadingPhone? <i className='fa fa-spin fa-spinner'/>:'Sync phone products'} 
+                            </button> 
+                            </> : 
+                            <i className='fa fa-spin fa-spinner' />
+                        }
+                        
+                    </div>)}
+                </div>: null}
             </div>
 
             <Modal isOpen={otherOpen}>
+                <Form onSubmit={addCustomProduct}>
                 <ModalHeader >
                     Add Custom Product
                 </ModalHeader>
@@ -460,7 +612,8 @@ function POS() {
                             <FormGroup>
                                 <input 
                                     type='text'
-                                    name="productname"
+                                    onChange={e => setCustom({...custom, name: e.target.value})}
+                                    defaultValue={custom.name}
                                     className='input'
                                 />
                             </FormGroup>
@@ -475,7 +628,8 @@ function POS() {
                                 <input 
                                     type='text'
                                     className='input'
-                                    name='productprice'
+                                    onChange={e => setCustom({...custom, price: e.target.value})}
+                                    defaultValue={custom.price}
                                     placeholder={currency}
                                 />
                             </FormGroup>
@@ -490,7 +644,8 @@ function POS() {
                                 <input 
                                     type='text'
                                     className='input'
-                                    name="productstock"
+                                    onChange={e => setCustom({...custom, stock: e.target.value})}
+                                    defaultValue={custom.stock}
                                 />
                             </FormGroup>
                         </div>
@@ -505,7 +660,8 @@ function POS() {
                                     type='text'
                                     className='input'
                                     placeholder='Enter barcode'
-                                    name="productbarcode"
+                                    onChange={e => setCustom({...custom, barcode: e.target.value})}
+                                    defaultValue={custom.barcode}
                                 />
                             </FormGroup>
                         </div>
@@ -517,19 +673,91 @@ function POS() {
                                 type='file' 
                                 className='d-none'
                                 accept='image/*'
+                                onChange={handleFile}
                             />
                             Upload Product Image
                         </label>
                     </Row>
                 </ModalBody>
                 <ModalFooter>
-                    <button className='btn btn-secondary' onClick={()=>toggleModal(!otherOpen)} > Close </button>
-                    <button className='btn btn-primary'> Submit </button>
+                    <button className='btn btn-light btn-rounded' type='button' onClick={()=> toggleModal(!otherOpen)} > Close </button>
+                    <button className='btn btn-primary btn-rounded'> Submit </button>
                 </ModalFooter>
+                </Form>
             </Modal>
-
-            <button className="d-none qckbtn" data-target=".quickAdd" data-toggle="modal"></button>
-            
+            <Modal isOpen={opened}>
+                <Form onSubmit={addVeg}>
+                    <ModalHeader>
+                        <b> Add Vegetable </b>
+                    </ModalHeader>
+                    <ModalBody>
+                        <Row>
+                            <Col>
+                                <FormGroup>
+                                    <Label>
+                                        <b> Price </b>
+                                    </Label>
+                                    <Input 
+                                        type='text'
+                                        placeholder={currency}
+                                        onChange={e => setVegetable({...vegetable, price:e.target.value})}
+                                        defaultValue={vegetable.price}
+                                        style={{border:'1px solid gray'}}
+                                    />
+                                </FormGroup>
+                            </Col>
+                            <Col>
+                                <FormGroup>
+                                    <Label>
+                                        <b> Weight </b>
+                                    </Label>
+                                    <Input 
+                                        type='text'
+                                        placeholder={`KGs / gm`}
+                                        onChange={e => setVegetable({...vegetable, unit:e.target.value})}
+                                        defaultValue={vegetable.unit}
+                                        style={{border:'1px solid gray'}}
+                                    />
+                                </FormGroup>
+                            </Col>
+                        </Row>
+                        <Row>
+                            <Col>
+                                <FormGroup>
+                                    <Label>
+                                        Quantity (optional)
+                                    </Label>
+                                    <Input 
+                                        type='number'
+                                        onChange={e=> setVegetable({...vegetable, stock: e.target.value})}
+                                        defaultValue={vegetable.stock}
+                                    />
+                                </FormGroup>
+                            </Col>
+                        </Row>
+                    </ModalBody>
+                    <ModalFooter >
+                        <button className='btn btn-light btn-rounded' type='button' onClick={()=> toggleVegetableModal(!opened)} >
+                            Cancel
+                        </button>
+                        <button className='btn btn-rounded btn-success' type={`submit`} > Add </button>
+                    </ModalFooter>
+                </Form>
+            </Modal>
+            <Modal isOpen={appModal} size='sm'>
+                <Form onSubmit={fetchPhoneProducts}>
+                    <ModalHeader>
+                        Enter application key 
+                    </ModalHeader>
+                    <ModalBody>
+                        <Input onChange={e=> setKey(e.target.value)} type='text' name='appKey'/>
+                    </ModalBody>
+                    <ModalFooter>
+                        <button className='btn btn-light btn-sm btn-rounded' type='button' onClick={()=> setAppModal(!appModal)}>Cancel</button>
+                        <button className='btn btn-success btn-sm btn-rounded' > Submit </button>
+                    </ModalFooter>
+                </Form>
+            </Modal>
         </>
     )
 }

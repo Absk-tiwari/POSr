@@ -3,20 +3,21 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useDispatch } from 'react-redux';
 import { useParams } from 'react-router-dom'
 import { Modal, ModalFooter, ModalHeader, Form, ModalBody, Row, Container, FormGroup, Label, Input } from 'reactstrap'
-import { useGetProductCategoriesQuery } from '../../features/centerSlice';
+import { commonApiSlice, useGetProductCategoriesQuery, useGetTaxesQuery, useToggleCategoryMutation } from '../../features/centerSlice';
+import toast from 'react-hot-toast';
 
 function CategoryAndTax() {
-
     const {type} = useParams()
-    const openPage = () => {};
     const dispatch = useDispatch();
-
-    const { data:original, isSuccess } = useGetProductCategoriesQuery()
+    
+    const { data:original, isSuccess, refetch } = useGetProductCategoriesQuery();
+    const { data:dbTaxes, isSuccess:taxLoaded, refetch: refetchTax } = useGetTaxesQuery()
+    const [ toggleCategory ] = useToggleCategoryMutation();
     const [categories, setCategories] = useState([]);
     const [editing, setEditing] = useState(false);
+    const [editingTax, setTaxEditing] = useState(false);
     const containerRef = useRef(null);
     const [taxes, setTaxes] = useState([]);
-    const [editingTax, setEditingTax ] = useState({})
 
     const [catFields, setCatField] = useState({})
 
@@ -29,31 +30,45 @@ function CategoryAndTax() {
     };
     const [open, setModal] = useState(false);
 
-    const editTax = e => {
+    const changeTax = e => {
         const {index} = e.target.dataset;
-        setTaxes([{...taxes[index], [e.target.name]: e.target.value}])
-        // setEditingTax({...editingTax, [e.target.name]: e.target.value})
-        console.log(taxes)
+        setTaxes(
+            taxes.map( (t, i)=> 
+                i=== parseInt(index) ? {...t, [e.target.name]: e.target.value}: t
+            )
+        ) 
     }
+
+    const editTax = (tID) => setTaxEditing(tID)
 
     const toggleModal = () => setModal(!open)
     const catChange = (e) => setCatField({ ...catFields, [e.target.name]:e.target.value })
 
     const initTax = () => {
-        setTaxes([...taxes, {name:'', amount:'', status:true }])
+        setTaxes([...taxes, {name:'', amount:'', status:true}]);
+        if(containerRef.current) {
+            // containerRef.current.scrollTop = containerRef.current.scrollHeight;
+            window.scrollTo(0, document.body.scrollHeight);
+        }
     }
-    const initCategory = () => { 
-        setCategories([...categories, { name:'', color:'', status: true }]);
-        document.querySelector('.categoryTable').scrollTop = document.querySelector('.table-responsive.categoryTable').scrollHeight
-        console.log('initiated?', categories)
+
+    const initCategory = () => {
+        setCategories([...categories, { name:'', color:'', status: true }]); 
+        if(containerRef.current) {
+            // containerRef.current.scrollTop = containerRef.current.scrollHeight;
+            window.scrollTo(0, document.body.scrollHeight);
+        } 
     }
 
     const createCategory = e => {
-
-        e.preventDefault();
+ 
         dispatch({type:"LOADING"});
-        axios.post(`category/create`, catFields).then(({data})=> {
-            console.log(data);
+        const payload = categories[categories.length-1]; // the last one is the item to be saved
+        axios.post(`category/create`, payload ).then(({data})=> {
+            if(data.status) {
+                toast.success(`Category added successfully!`);
+                refetch();
+            }
         }).catch(()=>{})
         .finally(()=> dispatch({type:"STOP_LOADING"}));
 
@@ -64,53 +79,108 @@ function CategoryAndTax() {
         if(!id) {
             return setCategories(categories.filter( (cat, ind)=> ind !== parseInt(index)))
         }
-        if(!window.confirm('Are you sure?')) {
+        if(!window.confirm('Are you sure? Products associated with this category will also be deleted!')) {
             return 
         }
         dispatch({ type:"LOADING" });
         axios.get(`category/remove/${id}`).then(({data})=> {
-            console.log(data)
+            
+            if(data.status) {
+                setCategories(categories.filter( (cat, ind)=> ind !== parseInt(index)))
+                toast.success("Category removed!");
+                dispatch(
+                    commonApiSlice.util.updateQueryData('getPosProducts', undefined, draft => draft.products.filter(pr => pr.category_id !== parseInt(id)))
+                )
+                dispatch(
+                    commonApiSlice.util.updateQueryData('getProducts', undefined, cache => cache.products.filter( pr=> pr.catName !== categories[index].name ))
+                )
+            } else {
+                toast.error("Couldn't remove category!");
+            }
         }).catch(()=> null )
         .finally(()=> dispatch({ type:"STOP_LOADING" }))
     }
 
     const createTax = e => {
-
-        e.preventDefault();
+ 
         dispatch({type:"LOADING"});
-        axios.post(`category/create`, catFields).then(({data})=> {
-            console.log(data);
-        }).catch(()=>{})
+        const tax = taxes[taxes.length-1];
+        axios.post(`tax/create`, tax ).then(({data})=> {
+            if(data.status) {
+                toast.success("Tax successfully added!");
+                refetchTax()
+            } else {
+                toast.error("Something went wrong!");
+            }
+        }).catch(()=> toast.error("Something went wrong!"))
         .finally(()=> dispatch({type:"STOP_LOADING"}));
 
     }
 
-    const getTaxes = () => {
-        dispatch({type:"LOADING"});
-        axios.get('tax').then(({data})=> {
-            console.log(data)
-        }).catch(()=>{})
-        .finally(()=>dispatch({type:"STOP_LOADING"}))
+    const deleteTax = (id,event) => {
+        const {index} = event.target.dataset
+        if(!id) {
+            return setTaxes(taxes.filter( (cat, ind)=> ind !== parseInt(index)))
+        }
+        if(!window.confirm('Are you sure?')) {
+            return 
+        }
+        dispatch({ type:"LOADING" });
+        axios.get(`tax/remove/${id}`).then(({data})=> {
+            if(data.status) {
+                setTaxes(taxes.filter( (cat, ind)=> ind !== parseInt(index)))
+                toast.success("Tax removed!");
+            } else {
+                toast.error("Couldn't remove tax!");
+            }
+            dispatch(
+                commonApiSlice.util.updateQueryData('getTaxes', undefined, cache => cache.taxes.filter( t => t.id !== parseInt(id)))
+            )
+        }).catch(()=> null )
+        .finally(()=> dispatch({ type:"STOP_LOADING" }))
     }
 
     const edit = (id) => setEditing(id)
 
     const save = id => {
         const cat = categories.find( ite => ite.id === id);
-        axios.post('category/update', cat).then(({data})=> console.log(data)).catch().finally()
+        axios.post('category/update', cat).then(({data})=> {
+            if(data.status) {
+                toast.success(data.message)
+                refetch()
+            }
+        }).catch().finally()
     }
 
-    const updateTaxRow = e => {
-        e.preventDefault()
-        const {index} = e.target.dataset;
-        console.log(taxes[index])
-        // window.alert(index)
-    }
+    const saveTax = async id => {
+        const tax = taxes.find( t => t.id === id );
+        const {data} = await axios.post(`/tax/update`, tax);
+        if(data.status) {
+            refetchTax();
+            toast.success("Tax successfully updated!");
+            setTaxEditing(false)
+        }
+    } 
 
     const updateCategory = e => {
-        let {index} = e.target.dataset;
-        // console.log(index, categories[index]);
-        setCategories([...categories, {...categories[index], [e.target.name]: e.target.value }]) 
+        let {index} = e.target.dataset; 
+        setCategories(
+            categories.map((item, i) =>
+                i === parseInt(index) ? { ...item, [e.target.name]: e.target.value } : item
+            )
+        ) 
+    }
+
+    const setCategory = async e => {
+        let {id, status} = e.target.dataset;
+        let stat = parseInt(status) ? 0 : 1; 
+        e.preventDefault();
+        try {
+            let res = await toggleCategory({id, status:stat}).unwrap()
+            if (res.status) e.target.checked = stat
+        } catch (error) {
+            console.log("Exception on first sight:- "+ error.message )
+        }
     }
 
     useEffect(() => {
@@ -121,8 +191,11 @@ function CategoryAndTax() {
     },[ isSuccess,original ])
 
     useEffect(()=>{
+        if(taxLoaded) {
+            setTaxes(dbTaxes.taxes)
+        }
         return ()=> null
-    },[taxes, categories])
+    },[taxLoaded, dbTaxes])
 
     const CategoryModal = () => {
         return <Modal isOpen={open} toggle={toggleModal} > 
@@ -175,7 +248,7 @@ function CategoryAndTax() {
     return (
         <>
            <div className={`content-wrapper`} >
-                <div className="d-grid" id="pages">
+                <div className="d-grid" style={{overflowY:'auto'}} ref={containerRef}>
                     <div className="d-flex position-relative">
                         <button className="btn tablink" data-btn="category" onClick={() => handleJustifyClick('categories')} data-active={justifyActive==='categories'}> Categories </button>
                         <button className="btn tablink" data-btn="tax" onClick={() => handleJustifyClick('taxes')}  data-active={justifyActive==='taxes'} 
@@ -203,23 +276,34 @@ function CategoryAndTax() {
                                             </thead>
                                             <tbody>
                                             { categories.map( (cat,i) => (
-                                                <tr>
+                                                <tr key={i}>
                                                     <td> {1 + i} </td>        
                                                     <td> <Input name='name' type='text' data-index={i} onChange={updateCategory} disabled={ cat.id && editing!==cat.id } defaultValue={cat.name}/> </td>
-                                                    <td> <Input type='color' data-index={i} onChange={updateCategory} disabled={ cat.id && editing!==cat.id } defaultValue={cat.color} /> </td>        
+                                                    <td> <Input type='color' name='color' data-index={i} onChange={updateCategory} disabled={ cat.id && editing!==cat.id } defaultValue={cat.color} /> </td>        
                                                     <td>
-                                                        <input type={`checkbox`} data-index={i} onChange={updateCategory} style={{display:'none'}} id={`btn`+cat.id} name={'status'} defaultChecked={cat.status} className='status'/>
+                                                        <input type={`checkbox`} data-id={cat.id} data-status={cat.status} onChange={setCategory} id={`btn`+cat.id} name={'status'} defaultChecked={cat.status} className='status'/>
                                                         <label htmlFor={`btn`+cat.id}/>
                                                         <div className='plate'/>
                                                     </td>
                                                     <td>
-                                                        { cat.id && 
-                                                        (<button className={`btn btn-sm btn-primary ${editing===cat.id && 'btn-success'}`} onClick={()=> editing !== cat.id ? edit(cat.id): save(cat.id)}>
+                                                        { cat.id ? 
+                                                        (<>
+                                                        <button className={`btn btn-sm btn-primary ${editing===cat.id && 'btn-success'}`} onClick={()=> editing !== cat.id ? edit(cat.id): save(cat.id)}>
                                                             { editing && editing === cat.id ? 'Save':'Edit'}
-                                                        </button>)}
+                                                        </button>
                                                         <button data-index={i} className={`btn btn-sm btn-danger ms-3 delete`} onClick={e=> deleteCategory(cat.id, e)}>
                                                             Delete
                                                         </button>
+                                                        </>):
+                                                        <>
+                                                        <button className='btn btn-sm btn-success' onClick={createCategory}>
+                                                            Add
+                                                        </button>
+                                                        <button data-index={i} className={`btn btn-sm btn-light ms-3 delete`} onClick={e=> deleteCategory(cat.id, e)}>
+                                                            Cancel
+                                                        </button>
+                                                        </>
+                                                        }
                                                     </td>
                                                 </tr>
                                             )) }
@@ -254,21 +338,21 @@ function CategoryAndTax() {
                                                     return <tr key={i}>
                                                         <td>{1+i}</td>
                                                         <td>
-                                                            <input data-index={i} 
+                                                            <Input data-index={i} 
                                                                 name='name' 
                                                                 defaultValue={tax.name} 
-                                                                onBlur={updateTaxRow} 
-                                                                onChange={editTax}
+                                                                onChange={changeTax} 
+                                                                disabled={ tax.id && editingTax!==tax.id }
                                                                 className='input'
                                                             />
                                                         </td>
                                                         <td>
-                                                            <input 
+                                                            <Input 
                                                                 data-index={i} 
                                                                 name='amount' 
                                                                 defaultValue={tax.amount} 
-                                                                onBlur={updateTaxRow} 
-                                                                onChange={editTax}
+                                                                onChange={changeTax}
+                                                                disabled={ tax.id && editingTax!==tax.id }
                                                                 className='input'
                                                             />
                                                         </td>
@@ -278,8 +362,19 @@ function CategoryAndTax() {
                                                             <div className='plate' />
                                                         </td>
                                                         <td>
-                                                            {tax.id && <button className='btn btn-sm btn-rounded btn-primary'> Edit </button>}
-                                                            <button className='btn btn-sm btn-rounded btn-danger ms-3' onClick={()=> setTaxes(taxes.filter((item,ind)=> ind !== i))} >Delete</button>
+                                                            {tax.id ? (
+                                                            <>
+                                                                <button className={`btn btn-sm btn-primary ${editingTax === tax.id && 'btn-success'}`} onClick={()=> editingTax !== tax.id ? editTax(tax.id): saveTax(tax.id)}> 
+                                                                    { editingTax && editingTax === tax.id ? 'Save':'Edit'}    
+                                                                </button>
+                                                                <button className='btn btn-sm btn-rounded btn-danger ms-3' onClick={e => deleteTax(tax.id, e)} >Delete</button>
+                                                            </>
+                                                            ):(
+                                                            <>
+                                                                <button className='btn btn-sm btn-rounded btn-success' onClick={createTax}> Add </button>
+                                                                <button className='btn btn-sm btn-rounded btn-light ms-3' onClick={e => deleteTax(tax.id, e)} >Cancel</button>
+                                                            </>
+                                                            )}
                                                         </td>
                                                     </tr>
                                                 })}
@@ -293,43 +388,6 @@ function CategoryAndTax() {
                 </div>
 
            </div>
-           <div className="modal createCategory">
-                <div className="modal-dialog modal-md">
-                    <form onSubmit={createCategory} id="createCategory" method="POST">
-                        <div className="modal-content">
-                            <div className="modal-header">
-                                <div className="modal-title">
-                                    <h5> Add Category </h5>
-                                </div>
-                            </div>
-                            <div className="modal-body">
-                                <div className="row align-items-center">
-                                    <div className="col-4"> Name </div>
-                                    <div className="col-8">
-                                        <input type="text" className="form-control" name="name" />
-                                    </div>
-                                </div>
-                                <div className="row mt-2 align-items-center">
-                                    <div className="col-4"> Color </div>
-                                    <div className="col-8">
-                                        <input type="color" style={{width:'100px'}} placeholder="%" className="form-control" name="color" />
-                                    </div>
-                                </div>
-                                <div className="row mt-2 align-items-center">
-                                    <div className="col-4"> Status </div>
-                                    <div className="col-8">
-                                        <input type="checkbox" style={{display:'block'}} name="status" checked={true} />
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="modal-footer">
-                                <button className="btn-gray btn btn-sm close" data-dismiss="modal">Close</button>
-                                <button className="btn-sm btn btn-success" type="submit"> Add </button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            </div>
             <CategoryModal/>
         </>
     )

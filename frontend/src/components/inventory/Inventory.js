@@ -4,7 +4,7 @@ import { updateItem, useDeleteProductMutation, useGetProductsQuery, useTogglePOS
 import { commonApiSlice } from '../../features/centerSlice';
 import {chunk} from '../../helpers/utils';
 import $ from 'jquery';
-import axios from 'axios';
+import labelImg from '../../asset/images/default.png';
 import toast from 'react-hot-toast';
 
 function Inventory() {
@@ -20,12 +20,12 @@ function Inventory() {
     const { currency } = useSelector( state=> state.auth );
     const [ modal, setModal ] = useState(false);
     const { data, isSuccess:gotProducts } = useGetProductsQuery();
-    const [ updateStock, {isSuccess:stockUpdated} ] = useUpdateStockMutation();
-    const [ deleteProduct, {isSuccess: productDeleted} ] = useDeleteProductMutation();
-    const [ togglePOS, {isSuccess: statUpdated} ] = useTogglePOSMutation();
+    const [ updateStock ] = useUpdateStockMutation();
+    const [ deleteProduct ] = useDeleteProductMutation();
+    const [ togglePOS ] = useTogglePOSMutation();
 
-    const updateProduct = e => {
-        e.preventDefault();
+    const handleImgError = e => {
+        e.target.src = labelImg
     }
     const [ hovered, setHovered ] = useState('');
     const [ stock, setStock] = useState({id:'',stock:0});
@@ -36,32 +36,38 @@ function Inventory() {
     useEffect(()=> {
         if(gotProducts) { 
             setRowData(data.products)
-            setGrid(chunk(data.products.map( ({id, name, image, price, quantity, pos, ...rest }) => ({id, name, image:`http://localhost:5000/images/${image}`, price, quantity, pos })), 3))
+            setGrid(chunk(data.products.map( ({id, name, image, price, quantity, pos, ...rest }) => ({id, name, image:`http://localhost:5100/images/${image}`, price, quantity, pos })), 3))
         } 
+        return () => null
     },[ gotProducts, data ])
 
 
     useEffect(() => {
         $(tableRef.current).DataTable({
-        //   paging: true,
-          searching: true,
-          info: true,
-          ordering: true,
-          pageLength:40
-        });
-        $.fn.DataTable.ext.errMode = 'none';
-       
-      }, [view, rowData]);
-
-    useEffect(() => {
-        $(listtableRef.current).DataTable({
             paging: true,
             searching: true,
             info: true,
             ordering: true,
-            pageLength:40
+            processing:true,
+            lengthMenu:[ 10,25,50]
         });
         $.fn.DataTable.ext.errMode = 'none';
+        return () => null
+      }, [view, rowData, gotProducts]);
+
+    useEffect(() => {
+        if(rowData.length) {
+            $(listtableRef.current).DataTable({
+                paging: true,
+                searching: true,
+                info: true,
+                ordering: true,
+                lengthMenu:[ 10,25,50 ]
+            });
+        }
+        $.fn.DataTable.ext.errMode = 'none';
+        return ()=> $(listtableRef.current).DataTable().destroy()
+        
     }, [view, rowData]);
 
     const handleView = view => {
@@ -134,15 +140,15 @@ function Inventory() {
                                 </thead>
                                 <tbody>
                                     {rowData.map( row => <tr key={row.id}> 
-                                        <td>{row.name}</td>
-                                        <td>{currency +' '+row.price}</td>
-                                        <td>{row.code}</td>
-                                        <td>{row.weight}</td>
-                                        <td className='position-relative'>
+                                        <td onMouseOver={()=>setHovered('')}>{row.name}</td>
+                                        <td onMouseOver={()=>setHovered('')}>{currency +' '+row.price}</td>
+                                        <td onMouseOver={()=>setHovered('')}>{row.code}</td>
+                                        <td onMouseOver={()=>setHovered('')}>{row.weight}</td>
+                                        <td className='position-relative' onMouseOver={()=>setHovered('')}>
                                             <input className='input' data-id={row.id} onChange={handleStock} readOnly={hover!==row.id} defaultValue={row.quantity} />
                                             <span onClick={hover!==row.id ?  ()=>setHover(row.id): ()=> manageStock()} className='position-absolute btn btn-sm btn-rounded btn-success' style={{right:60}}>{hover===row.id ? 'Save': 'Edit'}</span>
                                         </td>
-                                        <td>
+                                        <td onMouseOver={()=>setHovered('')}>
                                             <input type='checkbox' name='status' onClick={showInPOS} data-status={row.pos} data-id={row.id} className='pos' id={`tabular-${row.id}`} defaultChecked={row.pos}/>
                                             <label htmlFor={`tabular-${row.id}`} />
                                             <div className='plate'></div>
@@ -150,12 +156,13 @@ function Inventory() {
                                         <td className='position-relative img'>
                                             <img 
                                                 className='img-fluid img-thumbnail'
-                                                src={`http://localhost:5000/images/${row.image}`} 
+                                                src={`http://localhost:5100/images/${row.image}`} 
                                                 onMouseEnter={()=>setHovered(row.id)}
+                                                onError={handleImgError}
                                                 alt=''
                                             />
                                             {
-                                                hovered === row.id && <div className='image-container' style={{backgroundImage:`url(http://localhost:5000/images/${row.image})`, backgroundSize:'cover', backgroundRepeat:'no-repeat'}}></div>
+                                                hovered === row.id && <div className='image-container' style={{backgroundImage:`url(http://localhost:5100/images/${row.image})`, backgroundSize:'cover', backgroundRepeat:'no-repeat'}}></div>
                                             }
                                         </td>
                                     </tr>)}
@@ -175,7 +182,6 @@ function Inventory() {
                                             { chunk.map( row => (<td key={row.id} colSpan={ chunk.length < 3 ? chunk.length: 0 }> <div className={`card-body d-flex grid-view`} >
                                                 <div className={`col-9 d-block`}>
                                                     <div className={`row`}>
-                                                        <i className={`fa-regular fa-star fs-5`} data-id={row.id} />
                                                         <strong className="wrapped-text">{row.name}<span className={`tooltiptext`}>{row.name}</span></strong>
                                                         <div className="row">
                                                             <b>Quantity: {row.quantity}</b>

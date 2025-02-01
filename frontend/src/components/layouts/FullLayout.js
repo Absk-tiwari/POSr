@@ -26,8 +26,8 @@ const FullLayout = () => {
             <Loader type="spinner-default" bgColor={'gray'} color={'white'} size={70}/>
         </div>
         { isLoggedIn && <Navbar/> }
-        <div className={`container page-body-wrapper w-100 ${location.pathname==='/dashboard'? 'home':''}`  } >
-            <div className={`main-panel w-100 ${location.pathname==='/login'?'login':''}`} >
+        <div className={`container1 page-body-wrapper w-100 ${location.pathname==='/dashboard'? 'home':''}  `} >
+            <div className={`${['/pos','/pos/customer','/pos/'].includes(location.pathname)? 'pos-panel':'main-panel'} w-100 ${location.pathname==='/login'?'login':''} ${location.pathname.indexOf('payment')!==-1 ? 'payment-screen':''}`} >
                 <Outlet />
             </div>
         </div>

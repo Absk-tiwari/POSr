@@ -56,7 +56,6 @@ router.post('/update', fetchuser, async(req, res) =>{
 
 router.get('/remove/:id', fetchuser, async(req, res) =>{
     try { 
-
         const taxDeleted = await Category.query().deleteById(req.params.id);
         if(taxDeleted) {
             return res.json({status:true, taxDeleted}); 
